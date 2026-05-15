@@ -2,6 +2,7 @@
 db.py - SQLite 数据库操作
 表：pending_notifications, job_runs
 """
+import os
 import sqlite3
 import json
 import logging
@@ -10,7 +11,25 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = '/root/.openclaw/workspace/tennis123-monitor.db'
+_SERVER_DB = '/root/.openclaw/workspace/tennis123-monitor.db'
+
+
+def _resolve_db_path() -> str:
+    env = os.environ.get('TENNIS123_DB_PATH')
+    if env:
+        return env
+    parent = os.path.dirname(_SERVER_DB)
+    try:
+        os.makedirs(parent, exist_ok=True)
+        return _SERVER_DB
+    except OSError:
+        # 本地测试回退：脚本所在目录的上一级
+        return os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tennis123-monitor.db')
+        )
+
+
+DB_PATH = _resolve_db_path()
 
 
 def get_conn() -> sqlite3.Connection:
