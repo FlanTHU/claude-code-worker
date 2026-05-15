@@ -11,9 +11,10 @@ import logging
 import json
 from typing import List, Dict
 
-from scraper import fetch_match_list, fetch_match_detail
+from scraper import fetch_match_list, fetch_match_detail, ChromeSingleton
 from rules import apply_rules
-from db import init_db, save_pending, query_pending, save_job_run, get_recent_jobs, get_stats
+from db import (init_db, save_pending, query_pending, save_job_run, get_recent_jobs, get_stats,
+                get_last_scanned_id, set_last_scanned_id)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +35,9 @@ def run_once(verbose: bool = True) -> Dict:
     init_db()
     start_ts = time.time()
 
+    # 预热 Chrome 单例，避免第一次抓取耗时
+    ChromeSingleton.get()
+
     summary = {
         "fetched": 0,
         "passed": 0,
@@ -46,9 +50,14 @@ def run_once(verbose: bool = True) -> Dict:
 
     try:
         # Step 1: 获取比赛 ID 列表
+        last_scanned_id = get_last_scanned_id()
+        logger.info(f"last_scanned_id={last_scanned_id}")
         logger.info("=== 开始抓取比赛列表 ===")
-        match_ids = fetch_match_list()
+        match_ids = fetch_match_list(start_id=last_scanned_id)
         logger.info(f"获取到 {len(match_ids)} 个比赛 ID: {match_ids}")
+
+        if match_ids:
+            set_last_scanned_id(max(match_ids))
 
         if not match_ids:
             logger.warning("比赛列表为空，跳过")
@@ -96,6 +105,8 @@ def run_once(verbose: bool = True) -> Dict:
         logger.error(f"run_once 全局异常: {e}", exc_info=True)
         summary["status"] = "error"
         summary["error"] = str(e)
+    finally:
+        ChromeSingleton.shutdown()
 
     duration = time.time() - start_ts
     save_job_run(

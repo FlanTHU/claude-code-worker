@@ -73,6 +73,11 @@ def init_db():
             duration_sec    REAL,
             status          TEXT DEFAULT 'ok'   -- ok / error / partial
         );
+
+        CREATE TABLE IF NOT EXISTS kv_store (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
         """)
         conn.commit()
         logger.info(f"数据库初始化完成: {DB_PATH}")
@@ -198,6 +203,33 @@ def get_stats() -> dict:
         last = c.fetchone()
         row['last_run'] = last['run_at'] if last else None
         return row
+    finally:
+        conn.close()
+
+
+def get_last_scanned_id() -> Optional[int]:
+    """获取上次扫描的最高 match_id"""
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT value FROM kv_store WHERE key='last_scanned_id'")
+        row = c.fetchone()
+        return int(row['value']) if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def set_last_scanned_id(match_id: int):
+    """记录本次扫描的最高 match_id"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_scanned_id', ?)",
+            (str(match_id),)
+        )
+        conn.commit()
     finally:
         conn.close()
 

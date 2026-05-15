@@ -7,14 +7,13 @@ sys.path.insert(0, '/root/.openclaw/workspace/lib/python')
 os.environ.setdefault('CLOAKBROWSER_CACHE_DIR', '/root/.openclaw/workspace/.cloakbrowser')
 
 CHROME_BIN = '/root/.openclaw/workspace/.cloakbrowser/chromium-146.0.7680.177.3/chrome'
-LD_LIB = '/tmp/mylibs2'
+LD_LIB = '/root/.openclaw/workspace/libs'  # 持久路径（原 /tmp/mylibs2）
 WS_LIB = '/tmp/wsmod/node_modules/ws'
 
 import subprocess
 import random
 import time
 import json
-import shutil
 import re
 import logging
 from typing import Optional
@@ -27,100 +26,149 @@ except ImportError:
     httpx = None
 
 
-def start_chrome(url: str, port: int = None):
-    """启动 headless Chromium，返回 (proc, port)"""
-    if port is None:
-        port = random.randint(9300, 9999)
-    userdata = f'/tmp/cloakbrowser-{port}'
-    os.makedirs(userdata, exist_ok=True)
-    env = os.environ.copy()
-    env['LD_LIBRARY_PATH'] = LD_LIB
-    proc = subprocess.Popen(
-        [
-            CHROME_BIN,
-            '--headless', '--no-sandbox',
-            f'--user-data-dir={userdata}',
-            '--disable-gpu', '--disable-dev-shm-usage',
-            '--disable-extensions',
-            '--disable-background-networking',
-            '--disable-default-apps',
-            f'--remote-debugging-port={port}',
-            url,
-        ],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(10)  # 等待页面渲染完成
-    return proc, port
+class ChromeSingleton:
+    """单例 Chrome，用 CDP Page.navigate 切换页面避免重复启动开销"""
+    _proc = None
+    _port = None
 
+    @classmethod
+    def get(cls):
+        if cls._proc is None or cls._proc.poll() is not None:
+            cls._start()
+        return cls
 
-def get_page_content(port: int) -> Optional[str]:
-    """通过 CDP 获取页面 innerText，使用 Node.js + ws 库"""
-    if httpx is None:
-        # 降级到 curl
-        r = subprocess.run(
-            ['curl', '-s', f'http://localhost:{port}/json'],
-            capture_output=True, text=True, timeout=5
+    @classmethod
+    def _start(cls):
+        cls._port = random.randint(9300, 9399)
+        userdata = f'/tmp/chrome-singleton-{cls._port}'
+        os.makedirs(userdata, exist_ok=True)
+        env = os.environ.copy()
+        env['LD_LIBRARY_PATH'] = LD_LIB
+        cls._proc = subprocess.Popen(
+            [
+                CHROME_BIN, '--headless', '--no-sandbox',
+                f'--user-data-dir={userdata}',
+                '--disable-gpu', '--disable-dev-shm-usage', '--disable-extensions',
+                '--disable-background-networking', '--disable-default-apps',
+                f'--remote-debugging-port={cls._port}',
+                'about:blank',
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
-        pages = json.loads(r.stdout)
-    else:
-        r = httpx.get(f'http://localhost:{port}/json', timeout=5)
-        pages = r.json()
+        time.sleep(5)
+        logger.info(f"ChromeSingleton 已启动 pid={cls._proc.pid} port={cls._port}")
 
-    if not pages:
-        logger.warning("CDP /json 返回空页面列表")
+    @classmethod
+    def _get_ws_url(cls) -> Optional[str]:
+        try:
+            if httpx is not None:
+                r = httpx.get(f'http://localhost:{cls._port}/json', timeout=5)
+                pages = r.json()
+            else:
+                r = subprocess.run(
+                    ['curl', '-s', f'http://localhost:{cls._port}/json'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                pages = json.loads(r.stdout)
+            if pages:
+                return pages[0]['webSocketDebuggerUrl']
+        except Exception as e:
+            logger.warning(f"获取 CDP WS URL 失败: {e}")
         return None
 
-    ws_url = pages[0]['webSocketDebuggerUrl']
+    @classmethod
+    def _do_navigate(cls, url: str, wait: int) -> Optional[str]:
+        ws_url = cls._get_ws_url()
+        if not ws_url:
+            return None
 
-    # Node.js 脚本：通过 CDP WebSocket 获取 innerText
-    script = f"""
+        total_wait_ms = wait * 1000
+        js_extra_ms = 3000   # loadEventFired 后额外等待 JS 渲染
+        timeout_ms = total_wait_ms + 8000
+
+        script = f"""
 const WebSocket = require('{WS_LIB}');
 const ws = new WebSocket('{ws_url}');
-ws.on('open', () => setTimeout(() => {{
+let done = false;
+let contentRequested = false;
+let msgId = 1;
+
+function finish(text) {{
+  if (done) return;
+  done = true;
+  process.stdout.write(text || '');
+  try {{ ws.close(); }} catch(e) {{}}
+  process.exit(0);
+}}
+
+function getContent() {{
+  if (contentRequested) return;
+  contentRequested = true;
   ws.send(JSON.stringify({{
-    id: 1,
-    method: 'Runtime.evaluate',
+    id: 99, method: 'Runtime.evaluate',
     params: {{ expression: 'document.body.innerText', returnByValue: true }}
   }}));
-}}, 2000));
+}}
+
+ws.on('open', () => {{
+  ws.send(JSON.stringify({{ id: msgId++, method: 'Page.enable', params: {{}} }}));
+  ws.send(JSON.stringify({{ id: msgId++, method: 'Page.navigate', params: {{ url: '{url}' }} }}));
+}});
+
 ws.on('message', d => {{
   const m = JSON.parse(d);
-  if (m.id === 1) {{
-    process.stdout.write(m.result && m.result.result ? (m.result.result.value || '') : '');
-    ws.close();
-    process.exit(0);
+  if (m.method === 'Page.loadEventFired') {{
+    setTimeout(getContent, {js_extra_ms});
+  }}
+  if (m.id === 99) {{
+    finish(m.result && m.result.result ? (m.result.result.value || '') : '');
   }}
 }});
-ws.on('error', e => {{ process.stderr.write(e.message); process.exit(1); }});
-setTimeout(() => process.exit(1), 15000);
+
+ws.on('error', e => {{ process.stderr.write(String(e)); process.exit(1); }});
+setTimeout(getContent, {total_wait_ms});
+setTimeout(() => {{ if (!done) process.exit(1); }}, {timeout_ms});
 """
-    result = subprocess.run(
-        ['node', '-e', script],
-        capture_output=True, text=True, timeout=20
-    )
-    if result.returncode != 0:
-        logger.warning(f"Node.js CDP 错误: {result.stderr[:200]}")
-    return result.stdout
+        result = subprocess.run(
+            ['node', '-e', script],
+            capture_output=True, text=True, timeout=wait + 12,
+        )
+        if result.returncode != 0 and result.stderr:
+            logger.warning(f"Node.js CDP 错误: {result.stderr[:200]}")
+        return result.stdout or None
+
+    @classmethod
+    def navigate_and_get(cls, url: str, wait: int = 8) -> Optional[str]:
+        """导航到 URL，等待加载，返回页面 innerText；空内容自动重启重试一次"""
+        for attempt in range(2):
+            if cls._proc is None or cls._proc.poll() is not None:
+                cls._start()
+            content = cls._do_navigate(url, wait)
+            if content and len(content.strip()) > 10:
+                return content
+            if attempt == 0:
+                logger.warning(f"页面内容为空，重启 Chrome 重试: {url}")
+                cls.shutdown()
+        return None
+
+    @classmethod
+    def shutdown(cls):
+        if cls._proc:
+            cls._proc.terminate()
+            try:
+                cls._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls._proc.kill()
+            cls._proc = None
+            cls._port = None
+            logger.info("ChromeSingleton 已关闭")
 
 
 def fetch_page(url: str) -> Optional[str]:
-    """抓取页面，返回 innerText"""
-    proc, port = start_chrome(url, port=None)
-    try:
-        content = get_page_content(port)
-        return content
-    except Exception as e:
-        logger.error(f"fetch_page 失败 {url}: {e}")
-        return None
-    finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-        shutil.rmtree(f'/tmp/cloakbrowser-{port}', ignore_errors=True)
+    """抓取页面，返回 innerText（通过 ChromeSingleton）"""
+    return ChromeSingleton.get().navigate_and_get(url)
 
 
 def parse_match_detail(text: str, match_id: int) -> dict:
@@ -178,21 +226,17 @@ def parse_match_detail(text: str, match_id: int) -> dict:
                     break
 
     # ── 级别（从名称或专用行提取） ────────────────────────────────────────
-    # 先从 "级别：..." 行提取
     for line in lines:
         if line.startswith('级别：') or line.startswith('级别:'):
-            # 有时格式为 "级别：\xa0\xa0 人数：5\xa0 类型：单打"
             m = re.search(r'(\d\.\d)', line)
             if m:
                 result["level"] = m.group(1)
-            # 赛制
             if '单打' in line:
                 result["format"] = "单打"
             elif '双打' in line:
                 result["format"] = "双打"
             break
 
-    # 兜底：从比赛名称提取
     if result["level"] == "unknown":
         for line in lines[:15]:
             m = re.search(r'(\d\.\d)', line)
@@ -200,7 +244,6 @@ def parse_match_detail(text: str, match_id: int) -> dict:
                 result["level"] = m.group(1)
                 break
 
-    # 兜底：赛制
     if result["format"] == "unknown":
         for line in lines:
             if '单打' in line:
@@ -213,48 +256,41 @@ def parse_match_detail(text: str, match_id: int) -> dict:
     # ── 球场/地点："所在球场：" 行 ──────────────────────────────────────
     for line in lines:
         if '所在球场' in line or '球场：' in line or '球场:' in line:
-            # 去掉前缀
             loc = re.sub(r'^所在球场[：:：]\s*', '', line).strip()
             loc = re.sub(r'\s*导航\s*$', '', loc).strip()
             if loc:
                 result["location"] = loc
             break
 
-    # 兜底：从名称行提取括号内的场地信息
     if not result["location"] and result["name"]:
         m = re.search(r'[（(]([^）)]+)[）)]', result["name"])
         if m:
             result["location"] = m.group(1)
 
-    # ── 开始时间："开始时间：YYYY年M月D号 HH:MM" ─────────────────────────
-    # 也支持 "YYYY/MM/DD HH:MM" 格式
+    # ── 开始时间 ─────────────────────────────────────────────────────────
     for line in lines:
         if '开始时间' in line:
-            # 中文格式：2026年3月18号 21:00
             m_cn = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})[号日]\s*(\d{1,2}:\d{2})', line)
             if m_cn:
                 y, mo, d, t = m_cn.groups()
                 result["start_time"] = f"{y}-{int(mo):02d}-{int(d):02d} {t}"
                 break
-            # 数字格式
             m_num = re.search(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s+(\d{1,2}:\d{2})', line)
             if m_num:
                 date_part = m_num.group(1).replace('/', '-')
                 result["start_time"] = f"{date_part} {m_num.group(2)}"
                 break
 
-    # 兜底：从名称中提取时间（如 "2026/05/15周五21点"）
     if not result["start_time"] and result["name"]:
         m = re.search(r'(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})[号日]?[^\d]*(\d{1,2})点', result["name"])
         if m:
             y, mo, d, h = m.groups()
             result["start_time"] = f"{y}-{int(mo):02d}-{int(d):02d} {int(h):02d}:00"
 
-    # ── 状态："状态：XXX" ─────────────────────────────────────────────────
+    # ── 状态 ─────────────────────────────────────────────────────────────
     for line in lines:
         if line.startswith('状态：') or line.startswith('状态:'):
             status_val = re.sub(r'^状态[：:]\s*', '', line).strip()
-            # 标准化状态
             if '报名中' in status_val or '报名' in status_val:
                 result["status"] = "报名中"
             elif '结束' in status_val or '已结束' in status_val:
@@ -269,9 +305,7 @@ def parse_match_detail(text: str, match_id: int) -> dict:
                 result["status"] = status_val
             break
 
-    # ── 报名者解析：表格格式 ──────────────────────────────────────────────
-    # 表头：序号\t会员\t级别\t积分\t胜负
-    # 数据行：1\t张三\t3.0\t1234\t胜5负3
+    # ── 报名者解析 ────────────────────────────────────────────────────────
     registrants = []
     in_player_table = False
     win_loss_pattern = re.compile(r'胜(\d+)\s*负(\d+)')
@@ -282,13 +316,11 @@ def parse_match_detail(text: str, match_id: int) -> dict:
             continue
         if not in_player_table:
             continue
-        # 结束条件
         if '我要报名' in line or '用户评论' in line or '评论' in line:
             break
         if '目前还没有人报名' in line or '没有人报名' in line:
             break
 
-        # 解析数据行（tab 分隔）
         parts = line.split('\t')
         if len(parts) >= 4:
             player_name = parts[1].strip() if len(parts) > 1 else ''
@@ -325,14 +357,10 @@ def fetch_match_detail(match_id: int) -> dict:
 
 
 def parse_match_list_text(text: str) -> list:
-    """
-    从列表页 innerText 提取比赛 ID 列表
-    URL 格式: /match/detail/{id}
-    """
+    """从列表页 innerText 提取比赛 ID 列表"""
     if not text:
         return []
     ids = re.findall(r'/match/detail/(\d+)', text)
-    # 去重保序
     seen = set()
     result = []
     for i in ids:
@@ -342,10 +370,10 @@ def parse_match_list_text(text: str) -> list:
     return result
 
 
-def fetch_match_list() -> list:
+def fetch_match_list(start_id: int = None) -> list:
     """
-    抓取北京地区报名中比赛列表，返回 match_id 列表
-    策略：先抓列表页，再尝试 ID 区间探测（兜底）
+    抓取北京地区报名中比赛列表，返回 match_id 列表。
+    start_id: 上次扫描的最高 ID，列表页为空时从 start_id+1 向上探测。
     """
     # 1. 主列表页
     list_urls = [
@@ -368,26 +396,34 @@ def fetch_match_list() -> list:
     if match_ids:
         return match_ids
 
-    # 2. 兜底：ID 区间探测（从高 ID 向低 ID，仅检测少量）
-    logger.info("列表页为空，启动 ID 探测（最多探测 20 个）")
-    # 从已知 seed ID 开始，向上探测
-    seed_ids = [57931, 57861, 57324, 56994, 56810]
-    max_id = max(seed_ids) + 50
-    min_id = max(seed_ids) - 100
-    step = 3
+    # 2. 兜底：向上探测 ID（从 last_scanned_id+1 或 seed+1 开始）
+    if start_id is not None:
+        scan_from = start_id + 1
+        logger.info(f"列表页为空，从 last_id={start_id} 向上扫描")
+    else:
+        seed_ids = [57931, 57861, 57324, 56994, 56810]
+        scan_from = max(seed_ids) + 1
+        logger.info(f"列表页为空，从 seed 向上扫描（起点 {scan_from}）")
+
     probed = []
-    count = 0
-    for mid in range(max_id, min_id, -step):
-        if count >= 20:
+    for mid in range(scan_from, scan_from + 30):
+        if len(probed) >= 20:
             break
         url = f"https://tennis123.net/match/detail/{mid}"
         text = fetch_page(url)
-        if text and '北京' in text and ('报名中' in text or '报名截止' not in text):
+        if not text or len(text.strip()) < 50:
+            continue
+        if '展德' in text:
+            logger.info(f"探测 {mid}: 展德场次，跳过")
+            continue
+        if '北京' in text:
             probed.append(mid)
             logger.info(f"探测命中: {mid}")
-        count += 1
 
-    return probed if probed else seed_ids[:3]
+    if probed:
+        return probed
+    # 最终兜底：返回空（由 monitor 处理）
+    return []
 
 
 if __name__ == '__main__':
