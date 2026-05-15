@@ -263,6 +263,8 @@ def parse_match_detail(text: str, match_id: int) -> dict:
                 result["status"] = "进行中"
             elif '截止' in status_val:
                 result["status"] = "报名截止"
+            elif '报满' in status_val or '已满' in status_val:
+                result["status"] = "报满"
             else:
                 result["status"] = status_val
             break

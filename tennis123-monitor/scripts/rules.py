@@ -135,11 +135,34 @@ def check_format(match: dict) -> Tuple[bool, str]:
 
 
 def check_status(match: dict) -> Tuple[bool, str]:
-    """检查报名状态"""
+    """检查报名状态：必须是报名中，排除报满/已结束等"""
     status = match.get("status", "")
     if status == "报名中":
         return True, "报名中"
     return False, f"状态为 {status!r}，非报名中"
+
+
+def check_adult_only(match: dict) -> Tuple[bool, str]:
+    """过滤青少年场次，只保留成人赛"""
+    name = match.get("name", "")
+    YOUTH_KEYWORDS = ["青少年", "少年", "青年", "junior", "Junior", "youth", "Youth", "U10", "U12", "U14", "U16", "U18"]
+    for kw in YOUTH_KEYWORDS:
+        if kw in name:
+            return False, f"场次名含「{kw}」，为青少年赛事"
+    return True, "成人场次"
+
+
+def check_not_full(match: dict) -> Tuple[bool, str]:
+    """过滤已报满场次"""
+    status = match.get("status", "")
+    if status in ("报满", "已满", "满员"):
+        return False, f"场次已报满（状态：{status}）"
+    # 通过人数/容量判断（如有）
+    capacity = match.get("capacity", 0)
+    registrants = match.get("registrants", [])
+    if capacity and len(registrants) >= capacity:
+        return False, f"报名人数已满（{len(registrants)}/{capacity}）"
+    return True, "未报满"
 
 
 def check_distance(match: dict) -> Tuple[bool, str]:
@@ -191,6 +214,8 @@ def apply_rules(match: dict) -> Tuple[bool, str]:
     """
     checks = [
         ("状态", check_status),
+        ("成人赛", check_adult_only),    # 新增：过滤青少年
+        ("未报满", check_not_full),       # 新增：过滤报满
         ("级别", check_level),
         ("赛制", check_format),
         ("时间窗口", check_time_window),
