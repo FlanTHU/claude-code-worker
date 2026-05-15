@@ -171,6 +171,33 @@ def fetch_page(url: str) -> Optional[str]:
     return ChromeSingleton.get().navigate_and_get(url)
 
 
+def parse_registrants(lines: list) -> list:
+    """从 innerText 行列表解析报名者信息。
+    匹配格式：1.\tchriswangh\t\t4013\t191胜 / 373负
+    """
+    result = []
+    for line in lines:
+        m = re.search(r'(\d+)胜\s*/\s*(\d+)负', line)
+        if m:
+            wins, losses = int(m.group(1)), int(m.group(2))
+            total = wins + losses
+            parts = [p.strip() for p in line.split('\t') if p.strip()]
+            # parts: ['1.', 'chriswangh', '4013', '191胜 / 373负']
+            name = parts[1] if len(parts) >= 2 else 'unknown'
+            score_str = parts[2] if len(parts) >= 3 else '0'
+            score = int(re.sub(r'\D', '', score_str)) if score_str else 0
+            win_rate = wins / total if total > 0 else 0.0
+            result.append({
+                'name': name,
+                'score': score,
+                'wins': wins,
+                'losses': losses,
+                'total': total,
+                'win_rate': win_rate,
+            })
+    return result
+
+
 def parse_match_detail(text: str, match_id: int) -> dict:
     """
     从详情页 innerText 解析比赛信息（基于实际页面结构）
@@ -306,42 +333,7 @@ def parse_match_detail(text: str, match_id: int) -> dict:
             break
 
     # ── 报名者解析 ────────────────────────────────────────────────────────
-    registrants = []
-    in_player_table = False
-    win_loss_pattern = re.compile(r'胜(\d+)\s*负(\d+)')
-
-    for line in lines:
-        if '序号' in line and '会员' in line and '胜负' in line:
-            in_player_table = True
-            continue
-        if not in_player_table:
-            continue
-        if '我要报名' in line or '用户评论' in line or '评论' in line:
-            break
-        if '目前还没有人报名' in line or '没有人报名' in line:
-            break
-
-        parts = line.split('\t')
-        if len(parts) >= 4:
-            player_name = parts[1].strip() if len(parts) > 1 else ''
-            player_level = parts[2].strip() if len(parts) > 2 else ''
-            win_loss_str = parts[-1].strip() if parts else ''
-
-            m = win_loss_pattern.search(win_loss_str)
-            if m and player_name:
-                wins = int(m.group(1))
-                losses = int(m.group(2))
-                total = wins + losses
-                registrants.append({
-                    "name": player_name,
-                    "level": player_level,
-                    "wins": wins,
-                    "losses": losses,
-                    "total": total,
-                    "win_rate": wins / total if total > 0 else 0.0,
-                })
-
-    result["registrants"] = registrants
+    result["registrants"] = parse_registrants(lines)
     return result
 
 
