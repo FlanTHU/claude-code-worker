@@ -127,7 +127,7 @@ def save_pending(match: dict, reason: str) -> bool:
         conn.close()
 
 
-def query_pending(include_notified: bool = False) -> List[dict]:
+def query_pending(include_notified: bool = False, limit: int = 50) -> List[dict]:
     """查询待推送（默认只查未通知的）"""
     conn = get_conn()
     try:
