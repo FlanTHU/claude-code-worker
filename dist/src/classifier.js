@@ -35,6 +35,7 @@ export function parseExplicitCommand(content) {
 // ---------------------------------------------------------------------------
 // L1: Keyword matching
 // ---------------------------------------------------------------------------
+const MIN_KEYWORD_MATCHES = 2;
 export function matchKeywords(content, topics) {
     if (topics.length === 0)
         return null;
@@ -44,11 +45,11 @@ export function matchKeywords(content, topics) {
         if (topic.keywords.length === 0)
             continue;
         const matchedCount = topic.keywords.filter(kw => normalized.includes(kw.toLowerCase())).length;
-        if (matchedCount === 0)
+        if (matchedCount < MIN_KEYWORD_MATCHES)
             continue;
-        // Confidence: ratio of matched keywords, boosted by match count
+        // Confidence: requires 2+ matches to even qualify; scales with ratio
         const ratio = matchedCount / Math.max(topic.keywords.length, 1);
-        const confidence = Math.min(0.5 + ratio * 0.5 + matchedCount * 0.05, 0.95);
+        const confidence = Math.min(0.4 + ratio * 0.4 + matchedCount * 0.05, 0.9);
         if (!best || confidence > best.confidence) {
             best = {
                 action: 'switch',
@@ -191,16 +192,17 @@ export async function classify(content, recentMessages, registry, config) {
         if (keywordResult && keywordResult.targetLabel !== activeTopic.label) {
             return keywordResult;
         }
-        // Check keyword overlap with active topic
+        // Check keyword overlap with active topic (require 2+ matches)
         const msgLower = content.toLowerCase();
-        const hasOverlap = activeTopic.keywords.length > 0 &&
-            activeTopic.keywords.some(kw => msgLower.includes(kw.toLowerCase()));
-        if (hasOverlap) {
+        const overlapCount = activeTopic.keywords.length > 0
+            ? activeTopic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length
+            : 0;
+        if (overlapCount >= 2) {
             return {
                 action: 'continue',
                 targetLabel: activeTopic.label,
                 confidence: 0.7,
-                reason: `Keyword overlap with active topic "${activeTopic.label}"`,
+                reason: `Keyword overlap (${overlapCount}) with active topic "${activeTopic.label}"`,
             };
         }
         // Time proximity: only for very short messages (< 5 chars) like

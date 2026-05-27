@@ -11,6 +11,18 @@ import type { TopicEntry, TopicRegistryData, TopicStatus } from './types.js';
 
 const REGISTRY_FILE = 'topic-sessions.json';
 
+const STOPWORDS = new Set([
+  // Chinese high-frequency function words that cause false matches
+  '怎么', '什么', '这个', '那个', '为什么', '怎么样', '是什么',
+  '这是', '那是', '可以', '不能', '已经', '还是', '或者',
+  '如何', '哪个', '哪些', '这些', '那些', '一下', '一些',
+  '但是', '因为', '所以', '如果', '虽然', '不过',
+  // English common words
+  'this', 'that', 'what', 'which', 'have', 'been', 'with',
+  'from', 'they', 'will', 'would', 'could', 'should',
+  'about', 'there', 'their', 'some', 'other', 'than',
+]);
+
 export class TopicRegistry {
   private data: TopicRegistryData;
   private filePath: string;
@@ -122,32 +134,32 @@ export class TopicRegistry {
 
     const words: string[] = [];
 
-    // Extract English words (>= 3 chars)
-    const engMatches = content.match(/[a-zA-Z]{3,}/g);
+    // Extract English words (>= 4 chars, skip common words)
+    const engMatches = content.match(/[a-zA-Z]{4,}/g);
     if (engMatches) {
       words.push(...engMatches.map(w => w.toLowerCase()));
     }
 
-    // Extract Chinese segments (2-4 char chunks as pseudo-keywords)
-    const chnMatches = content.match(/[一-鿿]{2,}/g);
+    // Extract Chinese segments (>= 3 chars to avoid stopword-level bigrams)
+    const chnMatches = content.match(/[一-鿿]{3,}/g);
     if (chnMatches) {
       for (const seg of chnMatches) {
         if (seg.length <= 4) {
           words.push(seg);
         } else {
-          // Chunk long Chinese sequences into 2-char bigrams
-          for (let i = 0; i < seg.length - 1; i += 2) {
-            words.push(seg.slice(i, i + 2));
+          // Chunk into 3-char trigrams for better specificity
+          for (let i = 0; i <= seg.length - 3; i += 3) {
+            words.push(seg.slice(i, i + 3));
           }
         }
       }
     }
 
-    const newKeywords = words.filter(w => !entry.keywords.includes(w));
-    entry.keywords.push(...newKeywords.slice(0, 8));
+    const filtered = words.filter(w => !STOPWORDS.has(w) && !entry.keywords.includes(w));
+    entry.keywords.push(...filtered.slice(0, 6));
 
-    if (entry.keywords.length > 50) {
-      entry.keywords = entry.keywords.slice(-50);
+    if (entry.keywords.length > 30) {
+      entry.keywords = entry.keywords.slice(-30);
     }
     this.save();
   }
