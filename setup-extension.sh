@@ -21,7 +21,13 @@ cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
   "version": "0.1.0",
   "description": "自动将私聊消息路由到话题隔离的 session",
   "main": "./index.js",
-  "runtimeExtensions": ["./index.js"]
+  "runtimeExtensions": ["./index.js"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": { "type": "boolean", "default": true }
+    }
+  }
 }
 MANIFEST
 
