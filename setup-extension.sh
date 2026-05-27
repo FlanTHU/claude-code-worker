@@ -118,4 +118,25 @@ echo ""
 echo "--- Registered commands ---"
 grep -i "Registered.*command" /tmp/gw.log
 echo ""
+echo "=== Step 9: Install @reboot auto-start ==="
+AUTOSTART_SCRIPT="/root/.openclaw/auto-setup-topic-router.sh"
+cat > "$AUTOSTART_SCRIPT" << 'AUTOEOF'
+#!/bin/bash
+# Auto-setup topic-router plugin on container start
+REPO_DIR="/root/.openclaw/workspace/code-repo"
+EXT_DIR="/app/dist/extensions/topic-router"
+
+if [ ! -f "$EXT_DIR/index.js" ]; then
+  echo "[topic-router] Extension missing, re-deploying..."
+  if [ -f "$REPO_DIR/setup-extension.sh" ]; then
+    bash "$REPO_DIR/setup-extension.sh"
+  fi
+fi
+AUTOEOF
+chmod +x "$AUTOSTART_SCRIPT"
+
+(crontab -l 2>/dev/null | grep -v "auto-setup-topic-router"; echo "@reboot /root/.openclaw/auto-setup-topic-router.sh >> /tmp/topic-router-autostart.log 2>&1") | crontab -
+echo "  Added @reboot crontab entry"
+
+echo ""
 echo "=== Done ==="
