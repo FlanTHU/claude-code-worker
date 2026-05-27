@@ -6,14 +6,19 @@ set -e
 REPO_DIR="/root/.openclaw/workspace/code-repo"
 EXT_DIR="/app/dist/extensions/topic-router"
 
-echo "=== Creating extension directory ==="
+echo "=== Step 1: Remove duplicate global plugin ==="
+rm -rf /root/.openclaw/extensions/topic-router
+rm -rf /root/.openclaw/plugins/topic-router
+
+echo "=== Step 2: Create extension directory ==="
+rm -rf "$EXT_DIR"
 mkdir -p "$EXT_DIR/src"
 
-echo "=== Copying compiled JS ==="
+echo "=== Step 3: Copy compiled JS ==="
 cp "$REPO_DIR/dist/index.js" "$EXT_DIR/"
 cp "$REPO_DIR/dist/src/"*.js "$EXT_DIR/src/"
 
-echo "=== Writing plugin manifest ==="
+echo "=== Step 4: Write plugin manifest ==="
 cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
 {
   "id": "topic-router",
@@ -31,13 +36,19 @@ cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
 }
 MANIFEST
 
-echo "=== Clearing old topic data ==="
+echo "=== Step 5: Write ESM-compatible diagnostic wrapper ==="
+cat > "$EXT_DIR/diag.mjs" << 'DIAG'
+import fs from 'node:fs';
+fs.writeFileSync('/tmp/topic-router-module-loaded.txt', `module loaded at ${new Date().toISOString()}\n`);
+DIAG
+
+echo "=== Step 6: Clear old topic data ==="
 rm -f "$REPO_DIR/topic-sessions.json"
 rm -rf "$REPO_DIR/conversations/"
 
-echo "=== Restarting gateway ==="
+echo "=== Step 7: Restart gateway ==="
 pkill -9 -f "openclaw" 2>/dev/null || true
-sleep 2
+sleep 3
 
 cat > /tmp/sg.sh << 'GWEOF'
 #!/bin/bash
@@ -48,11 +59,22 @@ exec openclaw gateway --port 18789 --verbose
 GWEOF
 chmod +x /tmp/sg.sh
 runuser -u node -- /tmp/sg.sh &>/tmp/gw.log &
-sleep 8
+sleep 10
 
-if cat /tmp/topic-router-module-loaded.txt 2>/dev/null; then
-  echo "=== SUCCESS: Plugin loaded ==="
+echo "=== Step 8: Check results ==="
+if pgrep -f "openclaw" > /dev/null; then
+  echo "  Gateway running (pid: $(pgrep -f 'openclaw' | head -1))"
 else
-  echo "=== FAILED: Checking logs ==="
-  grep -i "topic" /tmp/gw.log
+  echo "  ERROR: Gateway not running"
+  tail -20 /tmp/gw.log
+  exit 1
 fi
+
+echo ""
+echo "--- Plugin loading check ---"
+grep -i "topic-router\|plugin.*error\|plugin.*fail\|manifest" /tmp/gw.log | head -15
+echo ""
+echo "--- Registered commands ---"
+grep -i "Registered.*command" /tmp/gw.log
+echo ""
+echo "=== Done ==="
