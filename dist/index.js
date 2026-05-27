@@ -190,8 +190,8 @@ export default definePluginEntry({
                 || process.env.MODEL_API_KEY
                 || '';
         }
-        log(`[topic-router] API key source: ${llmConfig.apiKey ? 'found (' + llmConfig.apiKey.slice(0, 4) + '...)' : 'MISSING'}`);
-        log(`[topic-router] Available env keys: ${Object.keys(process.env).filter(k => /key|token|secret/i.test(k)).join(', ')}`);
+        log.info(`[topic-router] API key source: ${llmConfig.apiKey ? 'found (' + llmConfig.apiKey.slice(0, 4) + '...)' : 'MISSING'}`);
+        log.info(`[topic-router] Available env keys: ${Object.keys(process.env).filter(k => /key|token|secret/i.test(k)).join(', ')}`);
         log.info(`[topic-router] LLM config: ${llmConfig.baseUrl} model=${llmConfig.model}`);
         const hookHandler = async (event, ctx) => {
             log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
