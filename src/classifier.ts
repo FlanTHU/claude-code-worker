@@ -120,22 +120,12 @@ export function detectContinuation(
     normalized.startsWith(s.toLowerCase())
   );
 
-  if (hasContinuationSignal && normalized.length < 50) {
+  if (hasContinuationSignal) {
     return {
       action: 'continue',
       targetLabel: activeTopic.label,
       confidence: 0.85,
       reason: `Continuation signal detected, staying on "${activeTopic.label}"`,
-    };
-  }
-
-  // Short/medium messages (< 30 chars) in an active topic → continue
-  if (normalized.length < 30) {
-    return {
-      action: 'continue',
-      targetLabel: activeTopic.label,
-      confidence: 0.7,
-      reason: `Short message in active topic "${activeTopic.label}", continuing`,
     };
   }
 
