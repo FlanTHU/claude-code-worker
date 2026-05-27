@@ -1,12 +1,14 @@
-import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
+import fs from 'node:fs';
 import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch } from './src/hook-handler.js';
 import type { TopicRouterConfig } from './src/types.js';
 import type { LLMConfig } from './src/llm-client.js';
 
+function definePluginEntry<T>(opts: T): T { return opts; }
+
 // Module-level probe: confirms the file is imported at all
 try {
-  require('fs').writeFileSync('/tmp/topic-router-module-loaded.txt', `module loaded at ${new Date().toISOString()}\n`);
+  fs.writeFileSync('/tmp/topic-router-module-loaded.txt', `module loaded at ${new Date().toISOString()}\n`);
 } catch {}
 
 const DEFAULT_CONFIG: TopicRouterConfig = {
@@ -37,7 +39,6 @@ export default definePluginEntry({
 
     // Diagnostic: write timestamp to confirm register() executes
     try {
-      const fs = require('fs');
       fs.writeFileSync('/tmp/topic-router-register.txt', `register() called at ${new Date().toISOString()}\n`, { flag: 'w' });
     } catch {}
 

@@ -10,10 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
-    "types": ["node"],
-    "paths": {
-      "openclaw/plugin-sdk/plugin-entry": ["./openclaw-stubs/plugin-sdk/plugin-entry.ts"]
-    }
+    "types": ["node"]
   },
   "include": ["index.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
