@@ -66,9 +66,11 @@ export function matchKeywords(content, topics) {
 // ---------------------------------------------------------------------------
 /** Words that signal topic continuation (staying on the same topic). */
 const CONTINUATION_SIGNALS = [
-    '那', '那这', '那这个', '这个', '接着', '继续', '然后呢', '还有',
+    '它', '这', '那', '那这', '那这个', '这个', '接着', '继续', '然后呢', '还有',
     '再说', '另外', '而且', '并且', '对了', '顺便', '补充',
+    '怎么', '为什么', '是不是', '能不能', '会不会', '有没有',
     'what about', 'how about', 'and then', 'also', 'moreover',
+    'is it', 'does it', 'can it', 'will it',
 ];
 /** Words that signal topic switch (moving to a different topic). */
 const SWITCH_SIGNALS = [
@@ -86,7 +88,7 @@ export function detectContinuation(content, recentMessages, activeTopic) {
     if (hasSwitchSignal)
         return null;
     const hasContinuationSignal = CONTINUATION_SIGNALS.some(s => normalized.startsWith(s.toLowerCase()));
-    if (hasContinuationSignal && normalized.length < 30) {
+    if (hasContinuationSignal && normalized.length < 50) {
         return {
             action: 'continue',
             targetLabel: activeTopic.label,
@@ -94,8 +96,8 @@ export function detectContinuation(content, recentMessages, activeTopic) {
             reason: `Continuation signal detected, staying on "${activeTopic.label}"`,
         };
     }
-    // Very short messages (< 15 chars) in an active topic → continue
-    if (normalized.length < 15 && activeTopic.messageCount > 1) {
+    // Short messages (< 20 chars) in an active topic → continue
+    if (normalized.length < 20) {
         return {
             action: 'continue',
             targetLabel: activeTopic.label,
@@ -205,24 +207,23 @@ export async function classify(content, recentMessages, registry, config) {
                 reason: `Keyword overlap (${overlapCount}) with active topic "${activeTopic.label}"`,
             };
         }
-        // Time proximity: only for very short messages (< 5 chars) like
-        // "好的" "对" "继续" "嗯" where content analysis is unreliable
+        // Time proximity: within 5 minutes of last message → default continue
         const recencyMs = Date.now() - activeTopic.lastActiveAt;
-        const RECENCY_WINDOW = 3 * 60 * 1000;
-        if (recencyMs < RECENCY_WINDOW && content.trim().length < 5) {
+        const RECENCY_WINDOW = 5 * 60 * 1000;
+        if (recencyMs < RECENCY_WINDOW) {
             return {
                 action: 'continue',
                 targetLabel: activeTopic.label,
                 confidence: 0.6,
-                reason: `Very short message within ${Math.round(recencyMs / 1000)}s, continuing "${activeTopic.label}"`,
+                reason: `Within ${Math.round(recencyMs / 1000)}s of active topic "${activeTopic.label}", continuing`,
             };
         }
-        // No keyword overlap → new topic regardless of recency
+        // Beyond time window and no keyword overlap → new topic
         return {
             action: 'new',
             targetLabel: null,
             confidence: 0.5,
-            reason: `No relation to active topic "${activeTopic.label}", creating new topic`,
+            reason: `No relation to active topic "${activeTopic.label}" and beyond time window, creating new topic`,
         };
     }
     // No active topic, keyword match below threshold → try keyword match anyway

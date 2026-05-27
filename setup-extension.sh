@@ -81,7 +81,12 @@ rm -rf "$REPO_DIR/conversations/"
 
 echo "=== Step 7: Restart gateway ==="
 pkill -9 -f "openclaw" 2>/dev/null || true
-sleep 3
+sleep 2
+# Kill any stragglers
+pkill -9 -f "openclaw" 2>/dev/null || true
+pkill -9 -f "sg.sh" 2>/dev/null || true
+sleep 2
+echo "  Remaining openclaw procs: $(pgrep -f openclaw | wc -l)"
 
 cat > /tmp/sg.sh << 'GWEOF'
 #!/bin/bash
