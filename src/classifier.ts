@@ -143,9 +143,15 @@ export function detectContinuation(
 const CLASSIFY_SYSTEM_PROMPT = `你是一个话题分类器。根据用户的新消息和已有话题列表，判断这条消息属于哪个话题。
 
 规则：
-1. 如果消息明显是对当前活跃话题的追问、补充、延续，返回 "continue"
-2. 如果消息内容与某个已有话题相关，返回 "switch" 并指定该话题的 label
-3. 如果消息开启了一个全新的主题，与所有已有话题都无关，返回 "new"
+1. "continue" — 消息是对当前活跃话题的追问、补充、延续（如"怎么做"、"举个例子"、"然后呢"）
+2. "switch" — 消息内容与某个已有（非活跃）话题相关，指定该话题的 label
+3. "new" — 消息开启了全新主题，与所有已有话题都无关
+
+判断要点：
+- 如果新消息是一个完整的新问题（有主语+谓语+宾语），且主题与当前话题无关，应返回 "new"
+- 例如：当前话题是"Redis缓存"，用户问"明天会下雨吗"→ 这是新话题
+- 只有当新消息明确在追问/补充当前话题内容时才返回 "continue"
+- 短确认词（好/嗯/ok）不会发到这里，不用考虑
 
 只返回 JSON，不要其他文字：
 {"action": "continue|switch|new", "label": "话题label或null", "reason": "简短原因"}`;
@@ -363,18 +369,20 @@ export async function classify(
       };
     }
 
-    // Time proximity — only use for short/ambiguous messages.
-    // Substantial messages (>15 chars) with no keyword relation should be new topics.
+    // Time proximity — only use for very short confirmations (好/嗯/ok/知道了).
+    // Complete questions (with ？or ?) are NOT short messages regardless of char count.
     const recencyMs = Date.now() - activeTopic.lastActiveAt;
     const RECENCY_WINDOW = 5 * 60 * 1000;
-    const isShortMessage = content.trim().length <= 15;
+    const trimmedContent = content.trim();
+    const hasQuestionMark = /[？?]/.test(trimmedContent);
+    const isConfirmation = !hasQuestionMark && trimmedContent.length <= 6;
 
-    if (recencyMs < RECENCY_WINDOW && isShortMessage) {
+    if (recencyMs < RECENCY_WINDOW && isConfirmation) {
       return {
         action: 'continue',
         targetLabel: activeTopic.label,
         confidence: 0.55,
-        reason: `Short message within ${Math.round(recencyMs / 1000)}s, continuing "${activeTopic.label}"`,
+        reason: `Confirmation within ${Math.round(recencyMs / 1000)}s, continuing "${activeTopic.label}"`,
       };
     }
 
