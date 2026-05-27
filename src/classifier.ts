@@ -282,9 +282,21 @@ export async function classify(
       }
     }
 
-    // Time proximity: within 5 minutes of last message → default continue
+    // Time proximity check
     const recencyMs = Date.now() - activeTopic.lastActiveAt;
     const RECENCY_WINDOW = 5 * 60 * 1000;
+
+    // If active topic has keywords but message has ZERO overlap,
+    // and message is substantial, treat as new topic regardless of time
+    if (activeTopic.keywords.length >= 2 && overlapCount === 0 && content.trim().length > 15) {
+      return {
+        action: 'new',
+        targetLabel: null,
+        confidence: 0.6,
+        reason: `Zero keyword overlap with "${activeTopic.label}" (has ${activeTopic.keywords.length} keywords), new topic`,
+      };
+    }
+
     if (recencyMs < RECENCY_WINDOW) {
       return {
         action: 'continue',
