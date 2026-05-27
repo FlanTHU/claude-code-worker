@@ -87,20 +87,21 @@ export function matchKeywords(
   return best;
 }
 
-/** Words that signal topic continuation. */
+/** Words that signal topic continuation (must be sentence starters). */
 const CONTINUATION_SIGNALS = [
-  '它', '这', '那', '那这', '那这个', '这个', '接着', '继续', '然后呢', '还有',
-  '再说', '另外', '而且', '并且', '对了', '顺便', '补充',
-  '怎么', '为什么', '是不是', '能不能', '会不会', '有没有',
-  'what about', 'how about', 'and then', 'also', 'moreover',
+  '那这', '那这个', '这个怎么', '那怎么', '接着', '继续',
+  '然后呢', '还有呢', '再说说', '而且', '并且', '补充一下',
+  '是不是', '能不能', '会不会', '有没有', '可不可以',
+  '具体', '详细', '举个例', '比如',
+  'what about', 'how about', 'and then', 'also',
   'is it', 'does it', 'can it', 'will it',
 ];
 
 /** Words that signal topic switch. */
 const SWITCH_SIGNALS = [
-  '换个话题', '说到', '另外一个', '另', '对了说到', '回到',
-  '刚才那个', '之前那个', '上次那个', '之前说的',
-  'let me ask about', 'switching topics', 'by the way',
+  '换个话题', '换一个话题', '另外一个问题', '回到之前的话题',
+  '刚才那个话题', '之前那个话题', '上次那个话题',
+  'let me ask about', 'switching topics',
   'going back to', 'about that earlier',
 ];
 
@@ -392,15 +393,18 @@ export function generateTopicLabel(content: string): string {
   const normalized = content.trim();
 
   const patterns: Array<{ regex: RegExp; label: string }> = [
-    { regex: /天气|下雨|温度|气温|forecast/i, label: 'weather' },
-    { regex: /代码|编程|bug|debug|脚本|code|python|java|rust|golang/i, label: 'coding' },
+    { regex: /天气|下雨|温度|气温|forecast|weather/i, label: 'weather' },
+    { regex: /代码|编程|bug|debug|脚本|code|python|java|rust|golang|redis|mysql|mongodb|docker|k8s|kubernetes|nginx|api|http|tcp|数据库|缓存|memcached/i, label: 'coding' },
     { regex: /周报|日报|汇报|总结|复盘/i, label: 'report' },
     { regex: /新闻|资讯|热点/i, label: 'news' },
-    { regex: /股价|股票|基金|投资|A股|美股/i, label: 'finance' },
+    { regex: /股价|股票|基金|投资|A股|美股|理财/i, label: 'finance' },
     { regex: /翻译|translate/i, label: 'translate' },
     { regex: /搜索|查询|search|查找/i, label: 'search' },
-    { regex: /文档|doc|写|draft/i, label: 'writing' },
-    { regex: /sed|awk|grep|bash|shell|终端|命令行|linux/i, label: 'terminal' },
+    { regex: /文档|doc|写作|draft|文章/i, label: 'writing' },
+    { regex: /sed|awk|grep|bash|shell|终端|命令行|linux|chmod|curl|wget/i, label: 'terminal' },
+    { regex: /旅游|旅行|签证|机票|酒店|景点|travel/i, label: 'travel' },
+    { regex: /美食|做菜|食谱|餐厅|外卖/i, label: 'food' },
+    { regex: /健身|跑步|运动|减肥|锻炼/i, label: 'fitness' },
   ];
 
   for (const { regex, label } of patterns) {
