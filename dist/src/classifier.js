@@ -1,12 +1,10 @@
 /**
- * Topic Classifier — determines whether a message continues the current topic,
- * switches to an existing topic, starts a new topic, or should passthrough.
+ * Topic Classifier — hybrid rules + LLM approach.
  *
- * Classification strategy (priority order):
- *   L0: Explicit user commands (/switch, /new, /end)
- *   L1: Keyword matching against known topics
- *   L2: Continuation detection (short messages without switch signals)
- *   L3: LLM-based semantic classification (fallback)
+ * Strategy:
+ *   L0: Explicit commands (/switch, /new, /end) — always rules
+ *   L1: High-confidence rules (keyword 2+, continuation signals, short messages)
+ *   L2: LLM fallback for ambiguous cases
  */
 // ---------------------------------------------------------------------------
 // L0: Explicit command detection
@@ -33,7 +31,7 @@ export function parseExplicitCommand(content) {
     return null;
 }
 // ---------------------------------------------------------------------------
-// L1: Keyword matching
+// Rule-based helpers
 // ---------------------------------------------------------------------------
 const MIN_KEYWORD_MATCHES = 2;
 export function matchKeywords(content, topics) {
@@ -47,7 +45,6 @@ export function matchKeywords(content, topics) {
         const matchedCount = topic.keywords.filter(kw => normalized.includes(kw.toLowerCase())).length;
         if (matchedCount < MIN_KEYWORD_MATCHES)
             continue;
-        // Confidence: requires 2+ matches to even qualify; scales with ratio
         const ratio = matchedCount / Math.max(topic.keywords.length, 1);
         const confidence = Math.min(0.4 + ratio * 0.4 + matchedCount * 0.05, 0.9);
         if (!best || confidence > best.confidence) {
@@ -61,10 +58,7 @@ export function matchKeywords(content, topics) {
     }
     return best;
 }
-// ---------------------------------------------------------------------------
-// L2: Continuation detection
-// ---------------------------------------------------------------------------
-/** Words that signal topic continuation (staying on the same topic). */
+/** Words that signal topic continuation. */
 const CONTINUATION_SIGNALS = [
     '它', '这', '那', '那这', '那这个', '这个', '接着', '继续', '然后呢', '还有',
     '再说', '另外', '而且', '并且', '对了', '顺便', '补充',
@@ -72,18 +66,17 @@ const CONTINUATION_SIGNALS = [
     'what about', 'how about', 'and then', 'also', 'moreover',
     'is it', 'does it', 'can it', 'will it',
 ];
-/** Words that signal topic switch (moving to a different topic). */
+/** Words that signal topic switch. */
 const SWITCH_SIGNALS = [
     '换个话题', '说到', '另外一个', '另', '对了说到', '回到',
     '刚才那个', '之前那个', '上次那个', '之前说的',
     'let me ask about', 'switching topics', 'by the way',
     'going back to', 'about that earlier',
 ];
-export function detectContinuation(content, recentMessages, activeTopic) {
+export function detectContinuation(content, _recentMessages, activeTopic) {
     if (!activeTopic)
         return null;
     const normalized = content.toLowerCase().trim();
-    // Short messages (< 30 chars) without switch signals → likely continuation
     const hasSwitchSignal = SWITCH_SIGNALS.some(s => normalized.includes(s.toLowerCase()));
     if (hasSwitchSignal)
         return null;
@@ -108,60 +101,123 @@ export function detectContinuation(content, recentMessages, activeTopic) {
     return null;
 }
 // ---------------------------------------------------------------------------
-// L3: Back-reference detection
+// LLM-based classification
 // ---------------------------------------------------------------------------
-const BACK_REFERENCE_PATTERNS = [
-    /刚才.{0,5}(那个|说的|提到|聊的|讨论)/,
-    /之前.{0,5}(那个|说的|提到|聊的|讨论)/,
-    /上次.{0,5}(那个|说的|提到|聊的|讨论)/,
-    /回到.{0,10}(话题|问题|事情)/,
-    /(?:那个|这个).{0,5}(天气|代码|周报|股价|新闻)/,
-];
-export function detectBackReference(content, topics) {
-    const normalized = content.toLowerCase().trim();
-    for (const pattern of BACK_REFERENCE_PATTERNS) {
-        if (!pattern.test(normalized))
-            continue;
-        // Try to extract a topic label hint from the match
-        for (const topic of topics) {
-            const displayNameLower = topic.displayName.toLowerCase();
-            const labelLower = topic.label.toLowerCase();
-            if (normalized.includes(displayNameLower) ||
-                normalized.includes(labelLower) ||
-                topic.keywords.some(kw => normalized.includes(kw.toLowerCase()))) {
+const CLASSIFY_SYSTEM_PROMPT = `你是一个话题分类器。根据用户的新消息和已有话题列表，判断这条消息属于哪个话题。
+
+规则：
+1. 如果消息明显是对当前活跃话题的追问、补充、延续，返回 "continue"
+2. 如果消息内容与某个已有话题相关，返回 "switch" 并指定该话题的 label
+3. 如果消息开启了一个全新的主题，与所有已有话题都无关，返回 "new"
+
+只返回 JSON，不要其他文字：
+{"action": "continue|switch|new", "label": "话题label或null", "reason": "简短原因"}`;
+async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
+    const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
+    const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
+    const url = `${baseUrl}/chat/completions`;
+    const topicSummary = allTopics.map(t => {
+        const isActive = t.label === activeTopic?.label ? ' [当前活跃]' : '';
+        const kws = t.keywords.slice(0, 8).join(', ');
+        return `- ${t.label} (${t.displayName})${isActive}: 关键词=[${kws}], ${t.messageCount}条消息`;
+    }).join('\n');
+    const recentCtx = recentMessages.length > 0
+        ? `\n最近消息（当前话题 "${activeTopic?.label ?? '无'}"）:\n${recentMessages.slice(-3).map(m => `  - ${m.slice(0, 60)}`).join('\n')}`
+        : '';
+    const userPrompt = `已有话题：
+${topicSummary || '（暂无话题）'}
+${recentCtx}
+
+新消息：${content}
+
+请判断这条新消息的分类。`;
+    const body = {
+        model,
+        messages: [
+            { role: 'system', content: CLASSIFY_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 150,
+        temperature: 0.1,
+    };
+    log(`[classifier-llm] Calling LLM for classification...`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (llmConfig.apiKey) {
+            headers['Authorization'] = `Bearer ${llmConfig.apiKey}`;
+        }
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            log(`[classifier-llm] HTTP ${response.status}, falling back to rules`);
+            return null;
+        }
+        const data = await response.json();
+        const raw = data?.choices?.[0]?.message?.content ?? '';
+        log(`[classifier-llm] Raw response: ${raw.slice(0, 200)}`);
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (!jsonMatch)
+            return null;
+        const parsed = JSON.parse(jsonMatch[0]);
+        const action = parsed.action;
+        if (!['continue', 'switch', 'new'].includes(action))
+            return null;
+        let targetLabel = parsed.label || null;
+        // Validate switch target exists
+        if (action === 'switch' && targetLabel) {
+            const exists = allTopics.some(t => t.label === targetLabel);
+            if (!exists) {
+                targetLabel = activeTopic?.label ?? null;
                 return {
-                    action: 'switch',
-                    targetLabel: topic.label,
-                    confidence: 0.85,
-                    reason: `Back-reference detected → "${topic.label}"`,
+                    action: targetLabel ? 'continue' : 'new',
+                    targetLabel,
+                    confidence: 0.7,
+                    reason: `LLM suggested switch to unknown topic, defaulting (${parsed.reason})`,
                 };
             }
         }
+        if (action === 'continue') {
+            targetLabel = activeTopic?.label ?? null;
+        }
+        return {
+            action,
+            targetLabel,
+            confidence: 0.8,
+            reason: `LLM: ${parsed.reason ?? action}`,
+        };
     }
-    return null;
+    catch (err) {
+        log(`[classifier-llm] Error: ${err?.message}, falling back to rules`);
+        return null;
+    }
+    finally {
+        clearTimeout(timer);
+    }
 }
 // ---------------------------------------------------------------------------
-// Main classifier (orchestrates all levels)
+// Main classifier (hybrid: rules → LLM fallback)
 // ---------------------------------------------------------------------------
-export async function classify(content, recentMessages, registry, config) {
+export async function classify(content, recentMessages, registry, config, llmConfig, log) {
+    const noop = () => { };
+    const _log = log ?? noop;
     const allTopics = registry.getAll();
     const activeTopic = registry.getActive();
-    // L0: Explicit commands (highest priority, regardless of mode)
+    // L0: Explicit commands (highest priority)
     const cmd = parseExplicitCommand(content);
     if (cmd)
         return cmd;
-    // LLM mode is not yet implemented; fall through to rules-based classification
-    if (config.classifier.mode === 'llm') {
-        // TODO: implement LLM-based classification
-        // Falling through to rules-based logic as temporary behavior
-    }
-    // If no topics exist yet, everything is new or passthrough
+    // If no topics exist, first substantial message is always "new"
     if (allTopics.length === 0) {
-        // Heuristic: messages > 10 chars with question/instruction patterns → new topic
         if (content.trim().length > 10) {
             return {
                 action: 'new',
-                targetLabel: null, // Will be auto-generated
+                targetLabel: null,
                 confidence: 0.5,
                 reason: 'No existing topics, treating as new topic',
             };
@@ -173,33 +229,34 @@ export async function classify(content, recentMessages, registry, config) {
             reason: 'No existing topics, short message → passthrough',
         };
     }
-    // L1: Keyword matching
+    // L1: High-confidence rules (skip LLM if confident)
+    // Strong keyword match (2+ keywords hit)
     const keywordResult = matchKeywords(content, allTopics);
     if (keywordResult && keywordResult.confidence >= config.classifier.confidenceThreshold) {
         return keywordResult;
     }
-    // L2: Continuation detection
+    // Continuation signals / short messages
     const continuationResult = detectContinuation(content, recentMessages, activeTopic);
     if (continuationResult && continuationResult.confidence >= config.classifier.confidenceThreshold) {
         return continuationResult;
     }
-    // L3: Back-reference detection
-    const backRefResult = detectBackReference(content, allTopics);
-    if (backRefResult && backRefResult.confidence >= config.classifier.confidenceThreshold) {
-        return backRefResult;
+    // L2: LLM fallback for ambiguous cases
+    const useHybrid = config.classifier.mode === 'hybrid' || config.classifier.mode === 'llm';
+    if (useHybrid && llmConfig?.apiKey) {
+        const llmResult = await classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, _log);
+        if (llmResult)
+            return llmResult;
     }
-    // L4: If we have an active topic and no strong signal to switch
+    // L3: Fallback rules (if LLM unavailable or failed)
     if (activeTopic && activeTopic.messageCount > 0) {
-        // Check if keyword result suggests a different topic
         if (keywordResult && keywordResult.targetLabel !== activeTopic.label) {
             return keywordResult;
         }
-        // Check keyword overlap with active topic (require 2+ matches)
         const msgLower = content.toLowerCase();
         const overlapCount = activeTopic.keywords.length > 0
             ? activeTopic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length
             : 0;
-        if (overlapCount >= 2) {
+        if (overlapCount >= 1) {
             return {
                 action: 'continue',
                 targetLabel: activeTopic.label,
@@ -207,87 +264,69 @@ export async function classify(content, recentMessages, registry, config) {
                 reason: `Keyword overlap (${overlapCount}) with active topic "${activeTopic.label}"`,
             };
         }
-        // Check if there's even a single keyword match to another topic
-        // (relaxed threshold: 1 keyword is enough to switch away)
-        const msgLowerFull = content.toLowerCase();
+        // Check single keyword match to other topics
         for (const topic of allTopics) {
             if (topic.label === activeTopic.label)
                 continue;
             if (topic.keywords.length === 0)
                 continue;
-            const hits = topic.keywords.filter(kw => msgLowerFull.includes(kw.toLowerCase())).length;
+            const hits = topic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length;
             if (hits >= 1) {
                 return {
                     action: 'switch',
                     targetLabel: topic.label,
                     confidence: 0.65,
-                    reason: `Keyword match (${hits}) to inactive topic "${topic.label}", switching away from "${activeTopic.label}"`,
+                    reason: `Keyword match (${hits}) to "${topic.label}", switching from "${activeTopic.label}"`,
                 };
             }
         }
-        // Time proximity check
+        // Time proximity
         const recencyMs = Date.now() - activeTopic.lastActiveAt;
         const RECENCY_WINDOW = 5 * 60 * 1000;
-        // If active topic has accumulated enough keywords but message has ZERO overlap,
-        // and message is long enough to be a distinct question, treat as new topic
-        if (activeTopic.keywords.length >= 6 && overlapCount === 0 && content.trim().length > 25) {
-            return {
-                action: 'new',
-                targetLabel: null,
-                confidence: 0.6,
-                reason: `Zero keyword overlap with "${activeTopic.label}" (has ${activeTopic.keywords.length} keywords), new topic`,
-            };
-        }
         if (recencyMs < RECENCY_WINDOW) {
             return {
                 action: 'continue',
                 targetLabel: activeTopic.label,
-                confidence: 0.6,
-                reason: `Within ${Math.round(recencyMs / 1000)}s of active topic "${activeTopic.label}", continuing`,
+                confidence: 0.55,
+                reason: `Within ${Math.round(recencyMs / 1000)}s, no strong signal, continuing "${activeTopic.label}"`,
             };
         }
-        // Beyond time window and no keyword overlap → new topic
         return {
             action: 'new',
             targetLabel: null,
             confidence: 0.5,
-            reason: `No relation to active topic "${activeTopic.label}" and beyond time window, creating new topic`,
+            reason: `Beyond time window, no relation to "${activeTopic.label}"`,
         };
     }
-    // No active topic, keyword match below threshold → try keyword match anyway
-    if (keywordResult) {
+    if (keywordResult)
         return keywordResult;
-    }
-    // Fallback: passthrough to main session
     return {
-        action: 'passthrough',
+        action: 'new',
         targetLabel: null,
-        confidence: 0.3,
-        reason: 'No matching topic, no active topic → passthrough to main session',
+        confidence: 0.4,
+        reason: 'No active topic, no keyword match → new topic',
     };
 }
 // ---------------------------------------------------------------------------
-// Topic label generation (for new topics)
+// Topic label generation
 // ---------------------------------------------------------------------------
 export function generateTopicLabel(content) {
-    // Try to extract a meaningful label from the content
     const normalized = content.trim();
-    // Common topic patterns
     const patterns = [
         { regex: /天气|下雨|温度|气温|forecast/i, label: 'weather' },
-        { regex: /代码|编程|bug|debug|脚本|code/i, label: 'coding' },
+        { regex: /代码|编程|bug|debug|脚本|code|python|java|rust|golang/i, label: 'coding' },
         { regex: /周报|日报|汇报|总结|复盘/i, label: 'report' },
         { regex: /新闻|资讯|热点/i, label: 'news' },
-        { regex: /股价|股票|基金|投资/i, label: 'finance' },
+        { regex: /股价|股票|基金|投资|A股|美股/i, label: 'finance' },
         { regex: /翻译|translate/i, label: 'translate' },
         { regex: /搜索|查询|search|查找/i, label: 'search' },
         { regex: /文档|doc|写|draft/i, label: 'writing' },
+        { regex: /sed|awk|grep|bash|shell|终端|命令行|linux/i, label: 'terminal' },
     ];
     for (const { regex, label } of patterns) {
         if (regex.test(normalized))
             return label;
     }
-    // Fallback: use a hash of the first 20 chars
     const hash = simpleHash(normalized.slice(0, 20));
     return `topic-${hash}`;
 }

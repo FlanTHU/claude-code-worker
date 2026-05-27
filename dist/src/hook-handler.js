@@ -40,7 +40,7 @@ export async function handleBeforeDispatch(params) {
         return undefined;
     }
     const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
-    const result = await classify(content, recentMessages, registry, config);
+    const result = await classify(content, recentMessages, registry, config, llmConfig, log);
     log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
     const updated = [...recentMessages, content].slice(-RECENT_MESSAGE_WINDOW);
     recentMessagesBySession.set(sessionKey, updated);

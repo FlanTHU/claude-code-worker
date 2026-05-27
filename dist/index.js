@@ -4,7 +4,7 @@ function definePluginEntry(opts) { return opts; }
 const DEFAULT_CONFIG = {
     enabled: true,
     classifier: {
-        mode: 'rules',
+        mode: 'hybrid',
         confidenceThreshold: 0.6,
     },
     maxTopics: 20,

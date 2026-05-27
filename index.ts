@@ -9,7 +9,7 @@ function definePluginEntry<T>(opts: T): T { return opts; }
 const DEFAULT_CONFIG: TopicRouterConfig = {
   enabled: true,
   classifier: {
-    mode: 'rules',
+    mode: 'hybrid',
     confidenceThreshold: 0.6,
   },
   maxTopics: 20,
