@@ -215,7 +215,11 @@ export default definePluginEntry({
         return undefined;
       }
     };
+    // Register on multiple hook names to cover both dispatch paths:
+    // - before_dispatch: fires from the dispatch function (first 1-2 msgs)
+    // - before_agent_reply: fires from the embedded agent system (all subsequent msgs)
     api.on('before_dispatch', hookHandler);
+    api.on('before_agent_reply', hookHandler);
 
     log.info(`Plugin initialized (mode=${pluginConfig.classifier.mode}, maxTopics=${pluginConfig.maxTopics}, target=${pluginConfig.targetSessionKey})`);
   },
