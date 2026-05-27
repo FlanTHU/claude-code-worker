@@ -23,6 +23,7 @@ export declare class TopicRegistry {
     updateSummary(label: string, summary: string): void;
     /** Remove topics older than maxAgeMs. Returns count of pruned topics. */
     prune(maxAgeMs?: number): number;
+    private splitOnBreakChars;
     private normalizeLabel;
     private load;
     private save;

@@ -60,12 +60,15 @@ export function matchKeywords(content, topics) {
 }
 /** Words that signal topic continuation (must be sentence starters). */
 const CONTINUATION_SIGNALS = [
-    '那这', '那这个', '这个怎么', '那怎么', '接着', '继续',
-    '然后呢', '还有呢', '再说说', '而且', '并且', '补充一下',
+    '那这', '那这个', '这个怎么', '那怎么', '那个怎么',
+    '接着', '继续', '然后呢', '还有呢', '再说说',
+    '而且', '并且', '补充一下',
     '是不是', '能不能', '会不会', '有没有', '可不可以',
     '具体', '详细', '举个例', '比如',
+    '那如果', '那要是', '那比如', '那能',
     'what about', 'how about', 'and then', 'also',
     'is it', 'does it', 'can it', 'will it',
+    'what if', 'could you',
 ];
 /** Words that signal topic switch. */
 const SWITCH_SIGNALS = [
@@ -256,38 +259,46 @@ export async function classify(content, recentMessages, registry, config, llmCon
                 reason: `Keyword overlap (${overlapCount}) with active topic "${activeTopic.label}"`,
             };
         }
-        // Check single keyword match to other topics
+        // Check keyword match to other topics (require 2+ hits to avoid false switches)
+        let bestOtherHits = 0;
+        let bestOtherTopic = null;
         for (const topic of allTopics) {
             if (topic.label === activeTopic.label)
                 continue;
             if (topic.keywords.length === 0)
                 continue;
             const hits = topic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length;
-            if (hits >= 1) {
-                return {
-                    action: 'switch',
-                    targetLabel: topic.label,
-                    confidence: 0.65,
-                    reason: `Keyword match (${hits}) to "${topic.label}", switching from "${activeTopic.label}"`,
-                };
+            if (hits >= 2 && hits > bestOtherHits) {
+                bestOtherHits = hits;
+                bestOtherTopic = topic;
             }
         }
-        // Time proximity
+        if (bestOtherTopic) {
+            return {
+                action: 'switch',
+                targetLabel: bestOtherTopic.label,
+                confidence: 0.65,
+                reason: `Keyword match (${bestOtherHits}) to "${bestOtherTopic.label}", switching from "${activeTopic.label}"`,
+            };
+        }
+        // Time proximity — only use for short/ambiguous messages.
+        // Substantial messages (>15 chars) with no keyword relation should be new topics.
         const recencyMs = Date.now() - activeTopic.lastActiveAt;
         const RECENCY_WINDOW = 5 * 60 * 1000;
-        if (recencyMs < RECENCY_WINDOW) {
+        const isShortMessage = content.trim().length <= 15;
+        if (recencyMs < RECENCY_WINDOW && isShortMessage) {
             return {
                 action: 'continue',
                 targetLabel: activeTopic.label,
                 confidence: 0.55,
-                reason: `Within ${Math.round(recencyMs / 1000)}s, no strong signal, continuing "${activeTopic.label}"`,
+                reason: `Short message within ${Math.round(recencyMs / 1000)}s, continuing "${activeTopic.label}"`,
             };
         }
         return {
             action: 'new',
             targetLabel: null,
             confidence: 0.5,
-            reason: `Beyond time window, no relation to "${activeTopic.label}"`,
+            reason: `No keyword relation to "${activeTopic.label}"`,
         };
     }
     if (keywordResult)

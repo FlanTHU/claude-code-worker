@@ -23,6 +23,15 @@ const STOPWORDS = new Set([
   'about', 'there', 'their', 'some', 'other', 'than',
 ]);
 
+/** Chinese characters that are common conjunctions/particles and should break segments.
+ * Excludes chars that commonly appear in compound words (能→智能/功能, 不→不同). */
+const CJK_BREAK_CHARS = new Set([
+  '的', '了', '和', '与', '或', '在', '是', '有', '被', '把',
+  '给', '让', '用', '对', '从', '到', '也', '都', '就', '才',
+  '又', '再', '很', '太', '更', '最', '没', '要', '会',
+  '得', '着', '过', '吗', '呢', '吧', '啊', '呀', '哦',
+]);
+
 export class TopicRegistry {
   private data: TopicRegistryData;
   private filePath: string;
@@ -99,13 +108,15 @@ export class TopicRegistry {
 
   setActive(label: string): void {
     const normalized = this.normalizeLabel(label);
+    this.reload();
     const entry = this.data.topics[normalized];
     if (!entry) return;
 
-    // Mark previous active as inactive
-    const prev = this.getActive();
-    if (prev && prev.label !== normalized) {
-      prev.status = 'inactive';
+    // Mark ALL other active topics as inactive
+    for (const topic of Object.values(this.data.topics)) {
+      if (topic.label !== normalized && topic.status === 'active') {
+        topic.status = 'inactive';
+      }
     }
 
     entry.status = 'active';
@@ -149,22 +160,35 @@ export class TopicRegistry {
       words.push(...engMatches.map(w => w.toLowerCase()));
     }
 
-    // Extract Chinese segments (>= 3 chars to avoid stopword-level bigrams)
-    const chnMatches = content.match(/[一-鿿]{3,}/g);
-    if (chnMatches) {
-      for (const seg of chnMatches) {
-        if (seg.length <= 4) {
+    // Extract Chinese segments by splitting on common particles/conjunctions first,
+    // then taking segments of 2-4 chars (meaningful word-level units).
+    const chnRaw = content.replace(/[^一-鿿]/g, ' ');
+    const chnSegments = chnRaw.split(/\s+/).filter(Boolean);
+    for (const raw of chnSegments) {
+      // Split on break characters (particles, conjunctions)
+      const parts = this.splitOnBreakChars(raw);
+      for (const seg of parts) {
+        if (seg.length >= 2 && seg.length <= 4) {
           words.push(seg);
-        } else {
-          // Chunk into 3-char trigrams for better specificity
-          for (let i = 0; i <= seg.length - 3; i += 3) {
-            words.push(seg.slice(i, i + 3));
+        } else if (seg.length > 4) {
+          // Sliding window: extract 2-char bigrams with overlap for long segments
+          for (let i = 0; i <= seg.length - 2; i += 2) {
+            const chunk = seg.slice(i, i + Math.min(4, seg.length - i));
+            if (chunk.length >= 2) words.push(chunk);
           }
         }
       }
     }
 
-    const filtered = words.filter(w => !STOPWORDS.has(w) && !entry.keywords.includes(w));
+    const filtered = words.filter(w => {
+      if (entry.keywords.includes(w)) return false;
+      if (STOPWORDS.has(w)) return false;
+      // Filter keywords that start or end with a stopword (indicates bad segmentation)
+      for (const sw of STOPWORDS) {
+        if (w.startsWith(sw) || w.endsWith(sw)) return false;
+      }
+      return true;
+    });
     entry.keywords.push(...filtered.slice(0, 6));
 
     if (entry.keywords.length > 30) {
@@ -198,6 +222,21 @@ export class TopicRegistry {
   // ---------------------------------------------------------------------------
   // Serialization
   // ---------------------------------------------------------------------------
+
+  private splitOnBreakChars(str: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    for (const ch of str) {
+      if (CJK_BREAK_CHARS.has(ch)) {
+        if (current.length >= 2) parts.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    if (current.length >= 2) parts.push(current);
+    return parts;
+  }
 
   private normalizeLabel(label: string): string {
     return label
