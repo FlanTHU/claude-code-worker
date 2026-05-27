@@ -38,7 +38,7 @@ cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
   "commandAliases": [
     { "name": "topics", "kind": "runtime-slash" },
     { "name": "switch", "kind": "runtime-slash" },
-    { "name": "new", "kind": "runtime-slash" },
+    { "name": "newtopic", "kind": "runtime-slash" },
     { "name": "end", "kind": "runtime-slash" }
   ],
   "configSchema": {

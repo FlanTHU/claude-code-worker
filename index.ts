@@ -74,7 +74,7 @@ export default definePluginEntry({
         const current = registry.getActive();
 
         if (activeTopics.length === 0 && inactiveTopics.length === 0) {
-          return { text: '📋 当前没有活跃的话题。\n\n发送消息会自动创建新话题，或使用 `/new <标签>` 手动创建。' };
+          return { text: '📋 当前没有活跃的话题。\n\n发送消息会自动创建新话题，或使用 `/newtopic <标签>` 手动创建。' };
         }
 
         const lines: string[] = ['📋 **话题列表**\n'];
@@ -101,7 +101,7 @@ export default definePluginEntry({
         }
 
         lines.push('---');
-        lines.push('💡 使用 `/switch <标签>` 切换话题 | `/new <标签>` 新建话题 | `/end` 结束当前话题');
+        lines.push('💡 使用 `/switch <标签>` 切换话题 | `/newtopic <标签>` 新建话题 | `/end` 结束当前话题');
 
         return { text: lines.join('\n') };
       },
@@ -118,7 +118,7 @@ export default definePluginEntry({
           const current = registry.getActive();
           const allTopics = registry.getAll();
           if (allTopics.length === 0) {
-            return { text: '⚠️ 当前没有可切换的话题。使用 `/new <标签>` 创建一个。' };
+            return { text: '⚠️ 当前没有可切换的话题。使用 `/newtopic <标签>` 创建一个。' };
           }
           const lines = ['🔄 **切换话题** — 请输入 `/switch <标签>`:\n'];
           for (const topic of allTopics) {
@@ -144,7 +144,7 @@ export default definePluginEntry({
     });
 
     api.registerCommand({
-      name: 'new',
+      name: 'newtopic',
       description: '创建新话题',
       acceptsArgs: true,
       channels: ['feishu'],
