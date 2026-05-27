@@ -206,14 +206,8 @@ export default definePluginEntry({
         log.info(`Plugin initialized (mode=${pluginConfig.classifier.mode}, maxTopics=${pluginConfig.maxTopics}, target=${pluginConfig.targetSessionKey})`);
     },
 });
-function resolveStateDir(api) {
-    if (api.rootDir) {
-        return api.rootDir;
-    }
-    const stateDir = api.config?.session?.store
-        ? api.config.session.store.replace(/\/sessions\/?$/, '')
-        : `${process.env.HOME ?? '/root'}/.openclaw/state`;
-    return stateDir;
+function resolveStateDir(_api) {
+    return '/tmp/topic-router-state';
 }
 function formatTimeAgo(timestamp) {
     const diff = Date.now() - timestamp;

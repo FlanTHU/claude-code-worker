@@ -75,7 +75,10 @@ import fs from 'node:fs';
 fs.writeFileSync('/tmp/topic-router-module-loaded.txt', `module loaded at ${new Date().toISOString()}\n`);
 DIAG
 
-echo "=== Step 6: Clear old topic data ==="
+echo "=== Step 6: Create state directory & clear old data ==="
+rm -rf /tmp/topic-router-state
+mkdir -p /tmp/topic-router-state
+chmod 777 /tmp/topic-router-state
 rm -f "$REPO_DIR/topic-sessions.json"
 rm -rf "$REPO_DIR/conversations/"
 

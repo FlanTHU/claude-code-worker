@@ -243,14 +243,8 @@ export default definePluginEntry({
 });
 
 
-function resolveStateDir(api: any): string {
-  if (api.rootDir) {
-    return api.rootDir;
-  }
-  const stateDir = api.config?.session?.store
-    ? api.config.session.store.replace(/\/sessions\/?$/, '')
-    : `${process.env.HOME ?? '/root'}/.openclaw/state`;
-  return stateDir;
+function resolveStateDir(_api: any): string {
+  return '/tmp/topic-router-state';
 }
 
 function formatTimeAgo(timestamp: number): string {
