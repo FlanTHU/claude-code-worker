@@ -27,11 +27,20 @@ echo "=== Step 4: Write plugin manifest ==="
 cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
 {
   "id": "topic-router",
+  "activation": {
+    "onStartup": true
+  },
+  "enabledByDefault": true,
   "name": "Topic Router",
   "version": "0.1.0",
   "description": "自动将私聊消息路由到话题隔离的 session",
   "main": "./index.js",
-  "runtimeExtensions": ["./index.js"],
+  "commandAliases": [
+    { "name": "topics", "kind": "runtime-slash" },
+    { "name": "switch", "kind": "runtime-slash" },
+    { "name": "new", "kind": "runtime-slash" },
+    { "name": "end", "kind": "runtime-slash" }
+  ],
   "configSchema": {
     "type": "object",
     "properties": {
@@ -40,6 +49,24 @@ cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
   }
 }
 MANIFEST
+
+echo "=== Step 4.5: Register in openclaw.json ==="
+OCJSON="/root/.openclaw/openclaw.json"
+if [ -f "$OCJSON" ]; then
+  python3 -c "
+import json
+with open('$OCJSON') as f:
+    cfg = json.load(f)
+if 'plugins' not in cfg:
+    cfg['plugins'] = {}
+if 'entries' not in cfg['plugins']:
+    cfg['plugins']['entries'] = {}
+cfg['plugins']['entries']['topic-router'] = {'enabled': True}
+with open('$OCJSON', 'w') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+print('  Added topic-router to plugins.entries')
+"
+fi
 
 echo "=== Step 5: Write ESM-compatible diagnostic wrapper ==="
 cat > "$EXT_DIR/diag.mjs" << 'DIAG'
