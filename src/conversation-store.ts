@@ -13,9 +13,13 @@ interface TopicConversation {
 }
 
 const MAX_MESSAGES_PER_TOPIC = 40;
+const FLUSH_DELAY_MS = 500;
 
 export class ConversationStore {
   private dir: string;
+  private cache = new Map<string, TopicConversation>();
+  private dirty = new Set<string>();
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(stateDir: string) {
     this.dir = path.join(stateDir, 'conversations');
@@ -25,22 +29,50 @@ export class ConversationStore {
   }
 
   getMessages(label: string): ChatMessage[] {
-    const data = this.load(label);
-    return data?.messages ?? [];
+    const data = this.getOrLoad(label);
+    return data.messages;
   }
 
   appendMessage(label: string, msg: ChatMessage): void {
-    const data = this.load(label) ?? { label, messages: [] };
+    const data = this.getOrLoad(label);
     data.messages.push(msg);
     if (data.messages.length > MAX_MESSAGES_PER_TOPIC) {
       data.messages = data.messages.slice(-MAX_MESSAGES_PER_TOPIC);
     }
-    this.save(label, data);
+    this.dirty.add(label);
+    this.scheduleFlush();
   }
 
   clear(label: string): void {
+    this.cache.delete(label);
+    this.dirty.delete(label);
     const filePath = this.filePath(label);
     try { fs.unlinkSync(filePath); } catch {}
+  }
+
+  flushSync(): void {
+    for (const label of this.dirty) {
+      const data = this.cache.get(label);
+      if (data) this.writeToDisk(label, data);
+    }
+    this.dirty.clear();
+  }
+
+  private getOrLoad(label: string): TopicConversation {
+    let data = this.cache.get(label);
+    if (!data) {
+      data = this.readFromDisk(label) ?? { label, messages: [] };
+      this.cache.set(label, data);
+    }
+    return data;
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushSync();
+    }, FLUSH_DELAY_MS);
   }
 
   private filePath(label: string): string {
@@ -48,7 +80,7 @@ export class ConversationStore {
     return path.join(this.dir, `${safe}.json`);
   }
 
-  private load(label: string): TopicConversation | null {
+  private readFromDisk(label: string): TopicConversation | null {
     try {
       const raw = fs.readFileSync(this.filePath(label), 'utf-8');
       return JSON.parse(raw);
@@ -57,9 +89,11 @@ export class ConversationStore {
     }
   }
 
-  private save(label: string, data: TopicConversation): void {
-    const tmp = this.filePath(label) + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-    fs.renameSync(tmp, this.filePath(label));
+  private writeToDisk(label: string, data: TopicConversation): void {
+    try {
+      const tmp = this.filePath(label) + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+      fs.renameSync(tmp, this.filePath(label));
+    } catch {}
   }
 }
