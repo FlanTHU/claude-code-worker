@@ -18,6 +18,11 @@ echo "=== Step 3: Copy compiled JS ==="
 cp "$REPO_DIR/dist/index.js" "$EXT_DIR/"
 cp "$REPO_DIR/dist/src/"*.js "$EXT_DIR/src/"
 
+echo "=== Step 3.5: Write package.json for ESM ==="
+cat > "$EXT_DIR/package.json" << 'PKGJSON'
+{"name":"topic-router","type":"module","version":"0.1.0"}
+PKGJSON
+
 echo "=== Step 4: Write plugin manifest ==="
 cat > "$EXT_DIR/openclaw.plugin.json" << 'MANIFEST'
 {
