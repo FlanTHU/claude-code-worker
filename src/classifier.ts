@@ -127,8 +127,8 @@ export function detectContinuation(
     };
   }
 
-  // Short messages (< 20 chars) in an active topic → continue
-  if (normalized.length < 20) {
+  // Short/medium messages (< 30 chars) in an active topic → continue
+  if (normalized.length < 30) {
     return {
       action: 'continue',
       targetLabel: activeTopic.label,
@@ -286,9 +286,9 @@ export async function classify(
     const recencyMs = Date.now() - activeTopic.lastActiveAt;
     const RECENCY_WINDOW = 5 * 60 * 1000;
 
-    // If active topic has keywords but message has ZERO overlap,
-    // and message is substantial, treat as new topic regardless of time
-    if (activeTopic.keywords.length >= 2 && overlapCount === 0 && content.trim().length > 15) {
+    // If active topic has accumulated enough keywords but message has ZERO overlap,
+    // and message is long enough to be a distinct question, treat as new topic
+    if (activeTopic.keywords.length >= 6 && overlapCount === 0 && content.trim().length > 25) {
       return {
         action: 'new',
         targetLabel: null,
