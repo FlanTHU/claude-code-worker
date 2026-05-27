@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch } from './src/hook-handler.js';
 import type { TopicRouterConfig } from './src/types.js';
@@ -6,10 +5,6 @@ import type { LLMConfig } from './src/llm-client.js';
 
 function definePluginEntry<T>(opts: T): T { return opts; }
 
-// Module-level probe: confirms the file is imported at all
-try {
-  fs.writeFileSync('/tmp/topic-router-module-loaded.txt', `module loaded at ${new Date().toISOString()}\n`);
-} catch {}
 
 const DEFAULT_CONFIG: TopicRouterConfig = {
   enabled: true,
@@ -36,11 +31,6 @@ export default definePluginEntry({
 
   register(api: any) {
     const log = api.logger;
-
-    // Diagnostic: write timestamp to confirm register() executes
-    try {
-      fs.writeFileSync('/tmp/topic-router-register.txt', `register() called at ${new Date().toISOString()}\n`, { flag: 'w' });
-    } catch {}
 
     const pluginConfig: TopicRouterConfig = {
       ...DEFAULT_CONFIG,
@@ -215,15 +205,8 @@ export default definePluginEntry({
       ...(api.pluginConfig?.llm ?? {}),
     };
     if (!llmConfig.apiKey) {
-      llmConfig.apiKey = process.env.LLM_API_KEY
-        || process.env.OPENAI_API_KEY
-        || process.env.OPENCLAW_API_KEY
-        || process.env.API_KEY
-        || process.env.MODEL_API_KEY
-        || '';
+      llmConfig.apiKey = process.env.MODEL_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
     }
-    log.info(`[topic-router] API key source: ${llmConfig.apiKey ? 'found (' + llmConfig.apiKey.slice(0, 4) + '...)' : 'MISSING'}`);
-    log.info(`[topic-router] Available env keys: ${Object.keys(process.env).filter(k => /key|token|secret/i.test(k)).join(', ')}`);
 
     log.info(`[topic-router] LLM config: ${llmConfig.baseUrl} model=${llmConfig.model}`);
 
