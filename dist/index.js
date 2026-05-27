@@ -84,7 +84,7 @@ export default definePluginEntry({
                     lines.push('');
                 }
                 lines.push('---');
-                lines.push('💡 使用 `/switch <标签>` 切换话题 | `/newtopic <标签>` 新建话题 | `/end` 结束当前话题');
+                lines.push('💡 `/switch <标签>` 切换 | `/newtopic <标签>` 新建 | `/end` 结束当前 | `/endall` 清理全部');
                 return { text: lines.join('\n') };
             },
         });
@@ -136,24 +136,11 @@ export default definePluginEntry({
         });
         api.registerCommand({
             name: 'end',
-            description: '结束当前话题（/end all 清理全部）',
+            description: '结束当前或指定话题',
             acceptsArgs: true,
             channels: ['feishu'],
             handler: async (ctx) => {
                 const label = (ctx.args ?? '').trim();
-                if (label.toLowerCase() === 'all') {
-                    const all = registry.getAll();
-                    if (all.length === 0) {
-                        return { text: '⚠️ 当前没有话题。' };
-                    }
-                    for (const topic of all) {
-                        registry.markEnded(topic.label);
-                    }
-                    cmdLog(`Ended all ${all.length} topics`);
-                    return {
-                        text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
-                    };
-                }
                 const target = label || registry.getActive()?.label;
                 if (!target) {
                     return { text: '⚠️ 当前没有活跃话题。' };
@@ -166,6 +153,25 @@ export default definePluginEntry({
                 cmdLog(`Ended topic: ${target}`);
                 return {
                     text: `✅ 已结束话题 **${topic.displayName}** (${topic.label})\n\n后续消息将回到主 session。`,
+                };
+            },
+        });
+        api.registerCommand({
+            name: 'endall',
+            description: '清理全部话题',
+            acceptsArgs: false,
+            channels: ['feishu'],
+            handler: async (_ctx) => {
+                const all = registry.getAll();
+                if (all.length === 0) {
+                    return { text: '⚠️ 当前没有话题。' };
+                }
+                for (const topic of all) {
+                    registry.markEnded(topic.label);
+                }
+                cmdLog(`Ended all ${all.length} topics`);
+                return {
+                    text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
                 };
             },
         });
