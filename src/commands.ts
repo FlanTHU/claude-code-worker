@@ -126,6 +126,22 @@ const handleNew: CommandHandler = async ({ args, registry, log }) => {
 
 const handleEnd: CommandHandler = async ({ args, registry, log }) => {
   const label = args.trim();
+
+  if (label.toLowerCase() === 'all') {
+    const all = registry.getAll();
+    if (all.length === 0) {
+      return { handled: true, text: '⚠️ 当前没有话题。' };
+    }
+    for (const topic of all) {
+      registry.markEnded(topic.label);
+    }
+    log(`[topic-router] Ended all ${all.length} topics`);
+    return {
+      handled: true,
+      text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
+    };
+  }
+
   const target = label || registry.getActive()?.label;
 
   if (!target) {

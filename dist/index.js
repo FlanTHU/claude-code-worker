@@ -136,11 +136,24 @@ export default definePluginEntry({
         });
         api.registerCommand({
             name: 'end',
-            description: '结束当前话题',
+            description: '结束当前话题（/end all 清理全部）',
             acceptsArgs: true,
             channels: ['feishu'],
             handler: async (ctx) => {
                 const label = (ctx.args ?? '').trim();
+                if (label.toLowerCase() === 'all') {
+                    const all = registry.getAll();
+                    if (all.length === 0) {
+                        return { text: '⚠️ 当前没有话题。' };
+                    }
+                    for (const topic of all) {
+                        registry.markEnded(topic.label);
+                    }
+                    cmdLog(`Ended all ${all.length} topics`);
+                    return {
+                        text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
+                    };
+                }
                 const target = label || registry.getActive()?.label;
                 if (!target) {
                     return { text: '⚠️ 当前没有活跃话题。' };
