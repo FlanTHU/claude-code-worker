@@ -28,21 +28,29 @@ export class TopicRegistry {
     // ---------------------------------------------------------------------------
     // Query
     // ---------------------------------------------------------------------------
+    reload() {
+        this.data = this.load();
+    }
     getActive() {
+        this.reload();
         if (!this.data.activeSessionKey)
             return null;
         return Object.values(this.data.topics).find(t => t.sessionKey === this.data.activeSessionKey && t.status === 'active') ?? null;
     }
     get(label) {
+        this.reload();
         return this.data.topics[label];
     }
     getAll() {
+        this.reload();
         return Object.values(this.data.topics).filter(t => t.status !== 'ended');
     }
     getActiveTopics() {
+        this.reload();
         return Object.values(this.data.topics).filter(t => t.status === 'active');
     }
     getInactiveTopics() {
+        this.reload();
         return Object.values(this.data.topics).filter(t => t.status === 'inactive');
     }
     // ---------------------------------------------------------------------------

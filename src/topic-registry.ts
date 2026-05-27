@@ -36,7 +36,12 @@ export class TopicRegistry {
   // Query
   // ---------------------------------------------------------------------------
 
+  private reload(): void {
+    this.data = this.load();
+  }
+
   getActive(): TopicEntry | null {
+    this.reload();
     if (!this.data.activeSessionKey) return null;
     return Object.values(this.data.topics).find(
       t => t.sessionKey === this.data.activeSessionKey && t.status === 'active'
@@ -44,18 +49,22 @@ export class TopicRegistry {
   }
 
   get(label: string): TopicEntry | undefined {
+    this.reload();
     return this.data.topics[label];
   }
 
   getAll(): TopicEntry[] {
+    this.reload();
     return Object.values(this.data.topics).filter(t => t.status !== 'ended');
   }
 
   getActiveTopics(): TopicEntry[] {
+    this.reload();
     return Object.values(this.data.topics).filter(t => t.status === 'active');
   }
 
   getInactiveTopics(): TopicEntry[] {
+    this.reload();
     return Object.values(this.data.topics).filter(t => t.status === 'inactive');
   }
 

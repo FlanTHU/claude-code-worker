@@ -265,6 +265,23 @@ export async function classify(
       };
     }
 
+    // Check if there's even a single keyword match to another topic
+    // (relaxed threshold: 1 keyword is enough to switch away)
+    const msgLowerFull = content.toLowerCase();
+    for (const topic of allTopics) {
+      if (topic.label === activeTopic.label) continue;
+      if (topic.keywords.length === 0) continue;
+      const hits = topic.keywords.filter(kw => msgLowerFull.includes(kw.toLowerCase())).length;
+      if (hits >= 1) {
+        return {
+          action: 'switch',
+          targetLabel: topic.label,
+          confidence: 0.65,
+          reason: `Keyword match (${hits}) to inactive topic "${topic.label}", switching away from "${activeTopic.label}"`,
+        };
+      }
+    }
+
     // Time proximity: within 5 minutes of last message → default continue
     const recencyMs = Date.now() - activeTopic.lastActiveAt;
     const RECENCY_WINDOW = 5 * 60 * 1000;

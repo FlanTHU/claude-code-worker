@@ -9,6 +9,7 @@ export declare class TopicRegistry {
     private data;
     private filePath;
     constructor(stateDir: string);
+    private reload;
     getActive(): TopicEntry | null;
     get(label: string): TopicEntry | undefined;
     getAll(): TopicEntry[];
