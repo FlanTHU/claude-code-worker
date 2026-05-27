@@ -214,6 +214,9 @@ export default definePluginEntry({
       ...DEFAULT_LLM_CONFIG,
       ...(api.pluginConfig?.llm ?? {}),
     };
+    if (!llmConfig.apiKey) {
+      llmConfig.apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+    }
 
     log.info(`[topic-router] LLM config: ${llmConfig.baseUrl} model=${llmConfig.model}`);
 

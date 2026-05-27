@@ -182,6 +182,9 @@ export default definePluginEntry({
             ...DEFAULT_LLM_CONFIG,
             ...(api.pluginConfig?.llm ?? {}),
         };
+        if (!llmConfig.apiKey) {
+            llmConfig.apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+        }
         log.info(`[topic-router] LLM config: ${llmConfig.baseUrl} model=${llmConfig.model}`);
         const hookHandler = async (event, ctx) => {
             log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
