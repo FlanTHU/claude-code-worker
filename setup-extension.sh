@@ -6,6 +6,9 @@ set -e
 REPO_DIR="/root/.openclaw/workspace/code-repo"
 EXT_DIR="/app/dist/extensions/topic-router"
 
+# Fix git ownership check (container may switch users)
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+
 echo "=== Step 1: Remove duplicate global plugin ==="
 rm -rf /root/.openclaw/extensions/topic-router
 rm -rf /root/.openclaw/plugins/topic-router
@@ -125,6 +128,8 @@ cat > "$AUTOSTART_SCRIPT" << 'AUTOEOF'
 # Auto-setup topic-router plugin on container start
 REPO_DIR="/root/.openclaw/workspace/code-repo"
 EXT_DIR="/app/dist/extensions/topic-router"
+
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 
 if [ ! -f "$EXT_DIR/index.js" ]; then
   echo "[topic-router] Extension missing, re-deploying..."
