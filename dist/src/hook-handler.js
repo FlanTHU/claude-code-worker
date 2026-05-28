@@ -13,7 +13,6 @@ function runAgentTurn(sessionId, message, log) {
         log(`[agent-call] ${CLI_PATH} ${args.join(' ').slice(0, 100)}...`);
         execFile(CLI_PATH, args, {
             timeout: AGENT_TIMEOUT_MS,
-            env: { ...process.env, HOME: '/root/.openclaw/workspace/.oc-home' },
             maxBuffer: 1024 * 1024,
         }, (error, stdout, stderr) => {
             if (error) {
@@ -23,22 +22,45 @@ function runAgentTurn(sessionId, message, log) {
                 return;
             }
             log(`[agent-call] stdout length=${stdout.length}`);
+            const cleanedStdout = stdout
+                .split('\n')
+                .filter(l => !l.startsWith('Debugger listening') && !l.startsWith('For help, see:') && !l.startsWith('Track SDK:'))
+                .join('\n')
+                .trim();
             try {
-                const result = JSON.parse(stdout);
-                const text = result?.reply?.text ?? result?.text ?? result?.output ?? stdout;
+                const result = JSON.parse(cleanedStdout);
+                const text = result?.result?.payloads?.[0]?.text ?? result?.reply?.text ?? result?.text ?? result?.output ?? cleanedStdout;
                 resolve(typeof text === 'string' ? text : JSON.stringify(text));
             }
             catch {
-                // Not JSON — use raw stdout, strip debugger lines
-                const cleaned = stdout
-                    .split('\n')
-                    .filter(l => !l.startsWith('Debugger listening') && !l.startsWith('For help, see:'))
-                    .join('\n')
-                    .trim();
-                resolve(cleaned || '(无回复)');
+                resolve(cleanedStdout || '(无回复)');
             }
         });
     });
+}
+const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
+function resolveTopicFromQuote(quotedContent, registry, log) {
+    if (!quotedContent)
+        return null;
+    const match = quotedContent.match(TOPIC_FOOTER_REGEX);
+    if (!match)
+        return null;
+    const footerValue = match[1].trim();
+    log(`[hook-handler] Found topic footer "${footerValue}" in quoted message`);
+    // Try direct label match first
+    if (registry.get(footerValue))
+        return footerValue;
+    // Footer uses displayName — find topic by displayName
+    const allTopics = registry.getAll();
+    const byDisplayName = allTopics.find(t => t.displayName === footerValue);
+    if (byDisplayName)
+        return byDisplayName.label;
+    // Partial match (displayName may be truncated with …)
+    const byPrefix = allTopics.find(t => footerValue.endsWith('…') && t.displayName.startsWith(footerValue.slice(0, -1)));
+    if (byPrefix)
+        return byPrefix.label;
+    log(`[hook-handler] Topic from footer "${footerValue}" not found in registry`);
+    return null;
 }
 function deriveDisplayName(content) {
     const trimmed = content.trim().replace(/\s+/g, ' ');
@@ -51,7 +73,17 @@ export async function handleBeforeDispatch(params) {
     const { event, registry, config, classifierLlmConfig, log } = params;
     const content = event.cleanedBody ?? event.content ?? event.body ?? '';
     const sessionKey = params.ctx?.sessionKey ?? event.sessionKey ?? '';
-    log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}"`);
+    // Extract quoted/reply message content from event (field name varies by adapter)
+    const quotedContent = event.quotedMessage ?? event.quotedContent
+        ?? event.replyContent ?? event.quote ?? event.parentContent
+        ?? event.replyText ?? event.quoteText ?? '';
+    // Log event keys on first call to discover field names
+    if (!quotedContent && event._quotedLogged !== true) {
+        const keys = Object.keys(event).filter(k => !['body', 'content', 'cleanedBody'].includes(k));
+        log(`[hook-handler] Event keys (no quote found): ${keys.join(', ')}`);
+        event._quotedLogged = true;
+    }
+    log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}" hasQuote=${!!quotedContent}`);
     if (!isTargetSession(sessionKey, config.targetSessionKey)) {
         return undefined;
     }
@@ -66,8 +98,23 @@ export async function handleBeforeDispatch(params) {
             return cmdResult;
         return undefined;
     }
+    // Detect topic from quoted message footer (📌 话题: xxx)
+    const quotedTopicLabel = resolveTopicFromQuote(quotedContent, registry, log);
     const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
-    const result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
+    // If quoting a topic message, force-route to that topic
+    let result;
+    if (quotedTopicLabel) {
+        result = {
+            action: 'continue',
+            targetLabel: quotedTopicLabel,
+            confidence: 0.95,
+            reason: `Quoted message belongs to topic "${quotedTopicLabel}"`,
+        };
+        log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}"`);
+    }
+    else {
+        result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
+    }
     log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
     const updated = [...recentMessages, content].slice(-RECENT_MESSAGE_WINDOW);
     recentMessagesBySession.set(sessionKey, updated);
@@ -117,7 +164,7 @@ export async function handleBeforeDispatch(params) {
     if (!topicLabel)
         return undefined;
     // ── Dispatch via OpenClaw agent CLI with topic-isolated session ──
-    const topicSessionId = `topic:${topicLabel}`;
+    const topicSessionId = `topic-${topicLabel}`;
     try {
         const reply = await runAgentTurn(topicSessionId, content, log);
         const topic = registry.get(topicLabel);

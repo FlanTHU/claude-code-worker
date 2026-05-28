@@ -48,6 +48,39 @@ function runAgentTurn(sessionId: string, message: string, log: (...args: unknown
   });
 }
 
+const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
+
+function resolveTopicFromQuote(
+  quotedContent: string,
+  registry: TopicRegistry,
+  log: (...args: unknown[]) => void
+): string | null {
+  if (!quotedContent) return null;
+
+  const match = quotedContent.match(TOPIC_FOOTER_REGEX);
+  if (!match) return null;
+
+  const footerValue = match[1].trim();
+  log(`[hook-handler] Found topic footer "${footerValue}" in quoted message`);
+
+  // Try direct label match first
+  if (registry.get(footerValue)) return footerValue;
+
+  // Footer uses displayName — find topic by displayName
+  const allTopics = registry.getAll();
+  const byDisplayName = allTopics.find(t => t.displayName === footerValue);
+  if (byDisplayName) return byDisplayName.label;
+
+  // Partial match (displayName may be truncated with …)
+  const byPrefix = allTopics.find(t =>
+    footerValue.endsWith('…') && t.displayName.startsWith(footerValue.slice(0, -1))
+  );
+  if (byPrefix) return byPrefix.label;
+
+  log(`[hook-handler] Topic from footer "${footerValue}" not found in registry`);
+  return null;
+}
+
 function deriveDisplayName(content: string): string {
   const trimmed = content.trim().replace(/\s+/g, ' ');
   const maxLen = 15;
@@ -69,7 +102,19 @@ export async function handleBeforeDispatch(params: {
   const content: string = event.cleanedBody ?? event.content ?? event.body ?? '';
   const sessionKey: string = params.ctx?.sessionKey ?? event.sessionKey ?? '';
 
-  log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}"`);
+  // Extract quoted/reply message content from event (field name varies by adapter)
+  const quotedContent: string = event.quotedMessage ?? event.quotedContent
+    ?? event.replyContent ?? event.quote ?? event.parentContent
+    ?? event.replyText ?? event.quoteText ?? '';
+
+  // Log event keys on first call to discover field names
+  if (!quotedContent && event._quotedLogged !== true) {
+    const keys = Object.keys(event).filter(k => !['body', 'content', 'cleanedBody'].includes(k));
+    log(`[hook-handler] Event keys (no quote found): ${keys.join(', ')}`);
+    event._quotedLogged = true;
+  }
+
+  log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}" hasQuote=${!!quotedContent}`);
 
   if (!isTargetSession(sessionKey, config.targetSessionKey)) {
     return undefined;
@@ -88,9 +133,24 @@ export async function handleBeforeDispatch(params: {
     return undefined;
   }
 
+  // Detect topic from quoted message footer (📌 话题: xxx)
+  const quotedTopicLabel = resolveTopicFromQuote(quotedContent, registry, log);
+
   const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
 
-  const result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
+  // If quoting a topic message, force-route to that topic
+  let result;
+  if (quotedTopicLabel) {
+    result = {
+      action: 'continue' as const,
+      targetLabel: quotedTopicLabel,
+      confidence: 0.95,
+      reason: `Quoted message belongs to topic "${quotedTopicLabel}"`,
+    };
+    log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}"`);
+  } else {
+    result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
+  }
 
   log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
 

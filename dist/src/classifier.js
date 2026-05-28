@@ -342,7 +342,7 @@ export function generateTopicLabel(content) {
             return label;
     }
     const hash = simpleHash(normalized.slice(0, 20));
-    return `topic-${hash}`;
+    return hash;
 }
 function simpleHash(str) {
     let hash = 0;
