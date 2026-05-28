@@ -21,7 +21,6 @@ function runAgentTurn(sessionId: string, message: string, log: (...args: unknown
 
     execFile(CLI_PATH, args, {
       timeout: AGENT_TIMEOUT_MS,
-      env: { ...process.env, HOME: '/root/.openclaw/workspace/.oc-home' },
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (error) {
@@ -148,7 +147,7 @@ export async function handleBeforeDispatch(params: {
   if (!topicLabel) return undefined;
 
   // ── Dispatch via OpenClaw agent CLI with topic-isolated session ──
-  const topicSessionId = `topic:${topicLabel}`;
+  const topicSessionId = `topic-${topicLabel}`;
 
   try {
     const reply = await runAgentTurn(topicSessionId, content, log);
