@@ -24,11 +24,14 @@ pkill -9 -f "openclaw" || true
 sleep 2
 runuser -u node -- /tmp/sg.sh &>/tmp/gw.log &
 
-sleep 5
-if pgrep -x "openclaw" >/dev/null; then
-  echo "OK: gateway running (pid=$(pgrep -x openclaw))"
-else
-  echo "FAIL: gateway not started"
-  tail -5 /tmp/gw.log
-  exit 1
-fi
+echo "Waiting for gateway to start..."
+for i in $(seq 1 15); do
+  sleep 2
+  if pgrep -x "openclaw" >/dev/null; then
+    echo "OK: gateway running (pid=$(pgrep -x openclaw)) after ${i}x2s"
+    exit 0
+  fi
+done
+echo "FAIL: gateway not started after 30s"
+tail -10 /tmp/gw.log
+exit 1
