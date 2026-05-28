@@ -215,7 +215,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
         return cmd;
     // If no topics exist, first substantial message is always "new"
     if (allTopics.length === 0) {
-        if (content.trim().length > 10) {
+        if (content.trim().length > 3) {
             return {
                 action: 'new',
                 targetLabel: null,
