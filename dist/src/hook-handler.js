@@ -71,7 +71,7 @@ function deriveDisplayNameFallback(content) {
 }
 async function deriveDisplayName(content, llmConfig, log) {
     const fallback = deriveDisplayNameFallback(content);
-    if (!llmConfig.apiKey)
+    if (!llmConfig?.apiKey)
         return fallback;
     const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
     const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
