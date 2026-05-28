@@ -98,21 +98,19 @@ export function detectContinuation(content, _recentMessages, activeTopic) {
 // ---------------------------------------------------------------------------
 // LLM-based classification
 // ---------------------------------------------------------------------------
-const CLASSIFY_SYSTEM_PROMPT = `你是一个话题分类器。根据用户的新消息和已有话题列表，判断这条消息属于哪个话题。
+const CLASSIFY_SYSTEM_PROMPT = `你是一个话题分类器。根据用户的新消息和已有话题列表，判断消息应路由到哪个话题。
 
 规则：
-1. "continue" — 消息是对当前活跃话题的追问、补充、延续（如"怎么做"、"举个例子"、"然后呢"）
-2. "switch" — 消息内容与某个已有（非活跃）话题相关，指定该话题的 label
-3. "new" — 消息开启了全新主题，与所有已有话题都无关
+1. "continue" — 消息属于当前活跃话题（追问、补充、延续，或无法确定归属时默认选此）
+2. "switch" — 消息明确与某个已有（非活跃）话题相关，指定该话题的 label
 
 判断要点：
-- 如果新消息是一个完整的新问题（有主语+谓语+宾语），且主题与当前话题无关，应返回 "new"
-- 例如：当前话题是"Redis缓存"，用户问"明天会下雨吗"→ 这是新话题
-- 只有当新消息明确在追问/补充当前话题内容时才返回 "continue"
-- 短确认词（好/嗯/ok）不会发到这里，不用考虑
+- 优先 continue：如果消息与当前活跃话题有任何关联性，选 continue
+- 只有消息明确属于另一个已存在的话题时才选 switch
+- 不确定时选 continue（用户可通过命令手动切换）
 
 只返回 JSON，不要其他文字：
-{"action": "continue|switch|new", "label": "话题label或null", "reason": "简短原因"}`;
+{"action": "continue|switch", "label": "话题label或null", "reason": "简短原因"}`;
 async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
     const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
     const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
@@ -167,7 +165,7 @@ ${recentCtx}
             return null;
         const parsed = JSON.parse(jsonMatch[0]);
         const action = parsed.action;
-        if (!['continue', 'switch', 'new'].includes(action))
+        if (!['continue', 'switch'].includes(action))
             return null;
         let targetLabel = parsed.label || null;
         // Validate switch target exists
@@ -176,7 +174,7 @@ ${recentCtx}
             if (!exists) {
                 targetLabel = activeTopic?.label ?? null;
                 return {
-                    action: targetLabel ? 'continue' : 'new',
+                    action: targetLabel ? 'continue' : 'passthrough',
                     targetLabel,
                     confidence: 0.7,
                     reason: `LLM suggested switch to unknown topic, defaulting (${parsed.reason})`,
@@ -213,21 +211,13 @@ export async function classify(content, recentMessages, registry, config, llmCon
     const cmd = parseExplicitCommand(content);
     if (cmd)
         return cmd;
-    // If no topics exist, first substantial message is always "new"
+    // No topics exist → passthrough. User must /new or /newtopic to create.
     if (allTopics.length === 0) {
-        if (content.trim().length > 3) {
-            return {
-                action: 'new',
-                targetLabel: null,
-                confidence: 0.5,
-                reason: 'No existing topics, treating as new topic',
-            };
-        }
         return {
             action: 'passthrough',
             targetLabel: null,
-            confidence: 0.3,
-            reason: 'No existing topics, short message → passthrough',
+            confidence: 0.9,
+            reason: 'No existing topics, passthrough to default session',
         };
     }
     // L1: High-confidence rules (skip LLM if confident)
@@ -287,35 +277,23 @@ export async function classify(content, recentMessages, registry, config, llmCon
                 reason: `Keyword match (${bestOtherHits}) to "${bestOtherTopic.label}", switching from "${activeTopic.label}"`,
             };
         }
-        // Time proximity — only use for very short confirmations (好/嗯/ok/知道了).
-        // Complete questions (with ？or ?) are NOT short messages regardless of char count.
-        const recencyMs = Date.now() - activeTopic.lastActiveAt;
-        const RECENCY_WINDOW = 5 * 60 * 1000;
-        const trimmedContent = content.trim();
-        const hasQuestionMark = /[？?]/.test(trimmedContent);
-        const isConfirmation = !hasQuestionMark && trimmedContent.length <= 6;
-        if (recencyMs < RECENCY_WINDOW && isConfirmation) {
-            return {
-                action: 'continue',
-                targetLabel: activeTopic.label,
-                confidence: 0.55,
-                reason: `Confirmation within ${Math.round(recencyMs / 1000)}s, continuing "${activeTopic.label}"`,
-            };
-        }
+        // Default: stay on active topic (sticky sessions).
+        // New topics only via explicit /new command.
         return {
-            action: 'new',
-            targetLabel: null,
-            confidence: 0.5,
-            reason: `No keyword relation to "${activeTopic.label}"`,
+            action: 'continue',
+            targetLabel: activeTopic.label,
+            confidence: 0.6,
+            reason: `Sticky: continuing active topic "${activeTopic.label}"`,
         };
     }
     if (keywordResult)
         return keywordResult;
+    // No active topic, no keyword match → passthrough to default session
     return {
-        action: 'new',
+        action: 'passthrough',
         targetLabel: null,
-        confidence: 0.4,
-        reason: 'No active topic, no keyword match → new topic',
+        confidence: 0.7,
+        reason: 'No active topic, no keyword match → passthrough',
     };
 }
 // ---------------------------------------------------------------------------

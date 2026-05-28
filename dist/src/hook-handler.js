@@ -4,7 +4,7 @@ import { tryHandleCommand } from './commands.js';
 import { execFile } from 'node:child_process';
 const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
-const AGENT_TIMEOUT_MS = 300_000; // 5 minutes
+const AGENT_TIMEOUT_MS = 120_000; // 2 minutes
 const CLI_PATH = '/root/.openclaw/workspace/bin/openclaw-cli.sh';
 const recentMessagesBySession = new Map();
 function runAgentTurn(sessionId, message, log) {
@@ -92,7 +92,7 @@ async function deriveDisplayName(content, llmConfig, log) {
         temperature: 0.1,
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 3000);
     try {
         const headers = { 'Content-Type': 'application/json' };
         if (llmConfig.apiKey) {
@@ -226,16 +226,7 @@ export async function handleBeforeDispatch(params) {
     // ── Dispatch via OpenClaw agent CLI with topic-isolated session ──
     const topicSessionId = `topic-${topicLabel}`;
     try {
-        let reply;
-        try {
-            reply = await runAgentTurn(topicSessionId, content, log);
-        }
-        catch (firstErr) {
-            log(`[hook-handler] Agent call failed (attempt 1): ${firstErr?.message?.slice(0, 100)}`);
-            // Retry once after short delay
-            await new Promise(r => setTimeout(r, 2000));
-            reply = await runAgentTurn(topicSessionId, content, log);
-        }
+        const reply = await runAgentTurn(topicSessionId, content, log);
         const topic = registry.get(topicLabel);
         const footer = config.replyFooter
             ? `\n\n---\n📌 话题: ${topic?.displayName ?? topicLabel}`
@@ -244,8 +235,7 @@ export async function handleBeforeDispatch(params) {
         return { handled: true, text: reply + footer };
     }
     catch (err) {
-        log(`[hook-handler] Agent call failed after retry: ${err?.message?.slice(0, 150)}`);
-        // Don't block — let normal dispatch handle it
+        log(`[hook-handler] Agent call failed: ${err?.message?.slice(0, 150)}`);
         return undefined;
     }
 }
