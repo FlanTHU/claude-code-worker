@@ -21,7 +21,6 @@ const DEFAULT_CONFIG: TopicRouterConfig = {
 const DEFAULT_LLM_CONFIG: LLMConfig = {
   baseUrl: 'http://model.mify.ai.srv/v1',
   model: 'xiaomi/mimo-v2.5-pro-mit',
-  systemPrompt: '你是一个有用的AI助手。请用简洁清晰的中文回答用户的问题。',
 };
 
 export default definePluginEntry({
@@ -198,17 +197,16 @@ export default definePluginEntry({
     });
 
     // ── Topic classifier hook ──
-    // Classifies messages and routes to topic-isolated sessions.
-    // Main agent handles the actual reply.
-    const llmConfig: LLMConfig = {
-      ...DEFAULT_LLM_CONFIG,
-      ...(api.pluginConfig?.llm ?? {}),
-    };
-    if (!llmConfig.apiKey) {
-      llmConfig.apiKey = process.env.MODEL_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
-    }
+    // Classifier uses mimo (fast, cheap). Reply dispatches via openclaw agent CLI (full pipeline).
+    const apiKey = process.env.MODEL_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 
-    log.info(`[topic-router] Classifier LLM: ${llmConfig.baseUrl} model=${llmConfig.model}`);
+    const classifierLlmConfig: LLMConfig = {
+      baseUrl: 'http://model.mify.ai.srv/v1',
+      model: 'xiaomi/mimo-v2.5-pro-mit',
+      apiKey,
+    };
+
+    log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: openclaw agent CLI`);
 
     const hookHandler = async (event: any, ctx: any) => {
       log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
@@ -219,7 +217,7 @@ export default definePluginEntry({
           registry,
           config: pluginConfig,
           stateDir,
-          llmConfig,
+          classifierLlmConfig,
           log: (...args: unknown[]) => log.info(...args),
         });
 

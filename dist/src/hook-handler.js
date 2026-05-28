@@ -1,9 +1,45 @@
 import { classify, generateTopicLabel } from './classifier.js';
 import { isTargetSession } from './utils.js';
 import { tryHandleCommand } from './commands.js';
+import { execFile } from 'node:child_process';
 const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
+const AGENT_TIMEOUT_MS = 300_000; // 5 minutes
+const CLI_PATH = '/root/.openclaw/workspace/bin/openclaw-cli.sh';
 const recentMessagesBySession = new Map();
+function runAgentTurn(sessionId, message, log) {
+    return new Promise((resolve, reject) => {
+        const args = ['agent', '--session-id', sessionId, '--message', message, '--json'];
+        log(`[agent-call] ${CLI_PATH} ${args.join(' ').slice(0, 100)}...`);
+        execFile(CLI_PATH, args, {
+            timeout: AGENT_TIMEOUT_MS,
+            env: { ...process.env, HOME: '/root/.openclaw/workspace/.oc-home' },
+            maxBuffer: 1024 * 1024,
+        }, (error, stdout, stderr) => {
+            if (error) {
+                log(`[agent-call] Error: ${error.message}`);
+                log(`[agent-call] stderr: ${stderr?.slice(0, 200)}`);
+                reject(error);
+                return;
+            }
+            log(`[agent-call] stdout length=${stdout.length}`);
+            try {
+                const result = JSON.parse(stdout);
+                const text = result?.reply?.text ?? result?.text ?? result?.output ?? stdout;
+                resolve(typeof text === 'string' ? text : JSON.stringify(text));
+            }
+            catch {
+                // Not JSON — use raw stdout, strip debugger lines
+                const cleaned = stdout
+                    .split('\n')
+                    .filter(l => !l.startsWith('Debugger listening') && !l.startsWith('For help, see:'))
+                    .join('\n')
+                    .trim();
+                resolve(cleaned || '(无回复)');
+            }
+        });
+    });
+}
 function deriveDisplayName(content) {
     const trimmed = content.trim().replace(/\s+/g, ' ');
     const maxLen = 15;
@@ -12,9 +48,9 @@ function deriveDisplayName(content) {
     return trimmed.slice(0, maxLen) + '…';
 }
 export async function handleBeforeDispatch(params) {
-    const { event, ctx, registry, config, llmConfig, log } = params;
+    const { event, registry, config, classifierLlmConfig, log } = params;
     const content = event.cleanedBody ?? event.content ?? event.body ?? '';
-    const sessionKey = ctx?.sessionKey ?? event.sessionKey ?? '';
+    const sessionKey = params.ctx?.sessionKey ?? event.sessionKey ?? '';
     log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}"`);
     if (!isTargetSession(sessionKey, config.targetSessionKey)) {
         return undefined;
@@ -31,7 +67,7 @@ export async function handleBeforeDispatch(params) {
         return undefined;
     }
     const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
-    const result = await classify(content, recentMessages, registry, config, llmConfig, log);
+    const result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
     log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
     const updated = [...recentMessages, content].slice(-RECENT_MESSAGE_WINDOW);
     recentMessagesBySession.set(sessionKey, updated);
@@ -80,16 +116,22 @@ export async function handleBeforeDispatch(params) {
     }
     if (!topicLabel)
         return undefined;
-    // ── Route to topic-isolated session by mutating ctx ──
-    const topic = registry.get(topicLabel);
-    const targetSession = topic?.sessionKey ?? `topic:${topicLabel}`;
-    log(`[hook-handler] Routing to session "${targetSession}" for topic "${topicLabel}"`);
-    // Mutate ctx to route the message to topic-specific session
-    // OpenClaw dispatch reads ctx.SessionKey (PascalCase) for session resolution
-    if (ctx) {
-        ctx.SessionKey = targetSession;
-        ctx.sessionKey = targetSession;
+    // ── Dispatch via OpenClaw agent CLI with topic-isolated session ──
+    const topicSessionId = `topic:${topicLabel}`;
+    try {
+        const reply = await runAgentTurn(topicSessionId, content, log);
+        const topic = registry.get(topicLabel);
+        const footer = config.replyFooter
+            ? `\n\n---\n📌 话题: ${topic?.displayName ?? topicLabel}`
+            : '';
+        log(`[hook-handler] Agent reply ${reply.length} chars for topic "${topicLabel}"`);
+        return { handled: true, text: reply + footer };
     }
-    // Return undefined = don't claim, let main agent handle with modified session
-    return undefined;
+    catch (err) {
+        log(`[hook-handler] Agent call failed: ${err?.message ?? err}`);
+        return {
+            handled: true,
+            text: `⚠️ 话题 "${topicLabel}" 处理失败: ${err?.message ?? '未知错误'}\n\n---\n📌 话题: ${topicLabel}`,
+        };
+    }
 }

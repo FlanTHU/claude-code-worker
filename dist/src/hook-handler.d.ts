@@ -7,6 +7,6 @@ export declare function handleBeforeDispatch(params: {
     registry: TopicRegistry;
     config: TopicRouterConfig;
     stateDir: string;
-    llmConfig: LLMConfig;
+    classifierLlmConfig: LLMConfig;
     log: (...args: unknown[]) => void;
 }): Promise<HookResult | undefined>;
