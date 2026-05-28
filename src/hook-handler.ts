@@ -108,14 +108,19 @@ export async function handleBeforeDispatch(params: {
 
   if (!topicLabel) return undefined;
 
-  // ── Route to topic-isolated session, let main agent handle the reply ──
+  // ── Route to topic-isolated session by mutating ctx ──
   const topic = registry.get(topicLabel);
-  const sessionKey_routed = topic?.sessionKey ?? `topic:${topicLabel}`;
+  const targetSession = topic?.sessionKey ?? `topic:${topicLabel}`;
 
-  log(`[hook-handler] Routing to session "${sessionKey_routed}" for topic "${topicLabel}"`);
+  log(`[hook-handler] Routing to session "${targetSession}" for topic "${topicLabel}"`);
 
-  return {
-    handled: false,
-    routeToSession: sessionKey_routed,
-  };
+  // Mutate ctx to route the message to topic-specific session
+  // OpenClaw dispatch reads ctx.SessionKey (PascalCase) for session resolution
+  if (ctx) {
+    ctx.SessionKey = targetSession;
+    ctx.sessionKey = targetSession;
+  }
+
+  // Return undefined = don't claim, let main agent handle with modified session
+  return undefined;
 }
