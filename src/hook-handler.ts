@@ -33,18 +33,17 @@ function runAgentTurn(sessionId: string, message: string, log: (...args: unknown
 
       log(`[agent-call] stdout length=${stdout.length}`);
 
+      const cleanedStdout = stdout
+        .split('\n')
+        .filter(l => !l.startsWith('Debugger listening') && !l.startsWith('For help, see:') && !l.startsWith('Track SDK:'))
+        .join('\n')
+        .trim();
       try {
-        const result = JSON.parse(stdout);
-        const text = result?.reply?.text ?? result?.text ?? result?.output ?? stdout;
+        const result = JSON.parse(cleanedStdout);
+        const text = result?.result?.payloads?.[0]?.text ?? result?.reply?.text ?? result?.text ?? result?.output ?? cleanedStdout;
         resolve(typeof text === 'string' ? text : JSON.stringify(text));
       } catch {
-        // Not JSON — use raw stdout, strip debugger lines
-        const cleaned = stdout
-          .split('\n')
-          .filter(l => !l.startsWith('Debugger listening') && !l.startsWith('For help, see:'))
-          .join('\n')
-          .trim();
-        resolve(cleaned || '(无回复)');
+        resolve(cleanedStdout || '(无回复)');
       }
     });
   });
