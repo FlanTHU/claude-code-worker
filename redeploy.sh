@@ -25,8 +25,8 @@ sleep 2
 runuser -u node -- /tmp/sg.sh &>/tmp/gw.log &
 
 sleep 5
-if pgrep -f "openclaw gateway" >/dev/null; then
-  echo "OK: gateway running"
+if pgrep -x "openclaw" >/dev/null; then
+  echo "OK: gateway running (pid=$(pgrep -x openclaw))"
 else
   echo "FAIL: gateway not started"
   tail -5 /tmp/gw.log
