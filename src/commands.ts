@@ -166,11 +166,28 @@ const handleEnd: CommandHandler = async ({ args, registry, log }) => {
 // Command router
 // ---------------------------------------------------------------------------
 
+const handleEndAll: CommandHandler = async ({ registry, log }) => {
+  const all = registry.getAll();
+  if (all.length === 0) {
+    return { handled: true, text: '⚠️ 当前没有话题。' };
+  }
+  for (const topic of all) {
+    registry.markEnded(topic.label);
+  }
+  log(`[topic-router] Ended all ${all.length} topics`);
+  return {
+    handled: true,
+    text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
+  };
+};
+
 const COMMANDS: Record<string, CommandHandler> = {
   topics: handleTopics,
   switch: handleSwitch,
   new: handleNew,
+  newtopic: handleNew,
   end: handleEnd,
+  endall: handleEndAll,
 };
 
 /**

@@ -141,7 +141,7 @@ export async function handleBeforeDispatch(params) {
     }
     const trimmed = content.trim();
     // Slash commands are handled by registerCommand, but also intercept here as fallback
-    if (/^\/(topics|switch|new|end)\b/i.test(trimmed)) {
+    if (/^\/(topics|switch|newtopic|new|endall|end)\b/i.test(trimmed)) {
         const cmdResult = await tryHandleCommand(content, registry, config, log);
         if (cmdResult)
             return cmdResult;

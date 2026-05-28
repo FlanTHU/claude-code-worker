@@ -26,8 +26,8 @@ export interface ClassifyOptions {
 
 const COMMAND_PATTERNS: Array<{ regex: RegExp; action: ClassifyResult['action'] }> = [
   { regex: /^\/switch\s+(\S+)/i, action: 'switch' },
-  { regex: /^\/new\s*(.*)/i, action: 'new' },
-  { regex: /^\/end\s*(.*)/i, action: 'passthrough' },
+  { regex: /^\/new(?:\s+(.*))?$/i, action: 'new' },
+  { regex: /^\/end(?:\s+(.*))?$/i, action: 'passthrough' },
 ];
 
 export function parseExplicitCommand(content: string): ClassifyResult | null {
