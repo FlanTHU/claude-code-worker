@@ -3,17 +3,17 @@
 # Run from: /root/.openclaw/workspace/code-repo/openclaw-topic-router
 set -e
 
-SRC="dist/src"
 DST="/app/dist/extensions/topic-router/src"
 
 git pull
 
-cp "$SRC/hook-handler.js" "$DST/hook-handler.js"
-cp "$SRC/classifier.js" "$DST/classifier.js"
-cp "$SRC/commands.js" "$DST/commands.js"
-cp "$SRC/topic-registry.js" "$DST/topic-registry.js"
-cp "$SRC/utils.js" "$DST/utils.js"
-cp dist/index.js /app/dist/extensions/topic-router/index.js
+# Use git show to avoid sparse-checkout / working-tree issues
+git show HEAD:dist/src/hook-handler.js > "$DST/hook-handler.js"
+git show HEAD:dist/src/classifier.js > "$DST/classifier.js"
+git show HEAD:dist/src/commands.js > "$DST/commands.js"
+git show HEAD:dist/src/topic-registry.js > "$DST/topic-registry.js"
+git show HEAD:dist/src/utils.js > "$DST/utils.js"
+git show HEAD:dist/index.js > /app/dist/extensions/topic-router/index.js
 
 pkill -9 -f "openclaw" || true
 sleep 2
