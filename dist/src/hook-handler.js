@@ -131,12 +131,12 @@ async function deriveDisplayName(content, llmConfig, log) {
 }
 export async function handleBeforeDispatch(params) {
     const { event, registry, config, classifierLlmConfig, log } = params;
-    const content = event.cleanedBody ?? event.content ?? event.body ?? '';
-    const sessionKey = params.ctx?.sessionKey ?? event.sessionKey ?? '';
+    const content = event.cleanedBody || event.content || event.body || '';
+    const sessionKey = params.ctx?.sessionKey || event.sessionKey || '';
     // Extract quoted/reply message content from event (field name varies by adapter)
-    const quotedContent = event.quotedMessage ?? event.quotedContent
-        ?? event.replyContent ?? event.quote ?? event.parentContent
-        ?? event.replyText ?? event.quoteText ?? '';
+    const quotedContent = event.quotedMessage || event.quotedContent
+        || event.replyContent || event.quote || event.parentContent
+        || event.replyText || event.quoteText || '';
     // Log event keys on first call to discover field names
     if (!quotedContent && event._quotedLogged !== true) {
         const keys = Object.keys(event).filter(k => !['body', 'content', 'cleanedBody'].includes(k));

@@ -172,13 +172,13 @@ export async function handleBeforeDispatch(params: {
 }): Promise<HookResult | undefined> {
   const { event, registry, config, classifierLlmConfig, log } = params;
 
-  const content: string = event.cleanedBody ?? event.content ?? event.body ?? '';
-  const sessionKey: string = params.ctx?.sessionKey ?? event.sessionKey ?? '';
+  const content: string = event.cleanedBody || event.content || event.body || '';
+  const sessionKey: string = params.ctx?.sessionKey || event.sessionKey || '';
 
   // Extract quoted/reply message content from event (field name varies by adapter)
-  const quotedContent: string = event.quotedMessage ?? event.quotedContent
-    ?? event.replyContent ?? event.quote ?? event.parentContent
-    ?? event.replyText ?? event.quoteText ?? '';
+  const quotedContent: string = event.quotedMessage || event.quotedContent
+    || event.replyContent || event.quote || event.parentContent
+    || event.replyText || event.quoteText || '';
 
   // Log event keys on first call to discover field names
   if (!quotedContent && event._quotedLogged !== true) {
