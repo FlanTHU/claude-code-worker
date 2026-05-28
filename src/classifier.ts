@@ -308,6 +308,28 @@ export async function classify(
     return continuationResult;
   }
 
+  // L1.5: Saturation check — auto-create new topic if active topic is "full" + long idle + unrelated
+  if (activeTopic && activeTopic.messageCount > 0) {
+    const idleMs = Date.now() - activeTopic.lastActiveAt;
+    const IDLE_THRESHOLD = 30 * 60 * 1000; // 30 minutes
+    const MSG_THRESHOLD = 8;
+    const msgLower = content.toLowerCase();
+    const hasKeywordOverlap = activeTopic.keywords.length > 0 &&
+      activeTopic.keywords.some(kw => msgLower.includes(kw.toLowerCase()));
+    const trimmedForCheck = content.trim();
+    const isSubstantial = (trimmedForCheck.length > 6 && /[？?。！!]/.test(trimmedForCheck)) || trimmedForCheck.length > 15;
+
+    if (activeTopic.messageCount >= MSG_THRESHOLD && idleMs >= IDLE_THRESHOLD && !hasKeywordOverlap && isSubstantial) {
+      _log(`[classifier] Auto-new: msgs=${activeTopic.messageCount}, idle=${Math.round(idleMs / 60000)}min, len=${trimmedForCheck.length}`);
+      return {
+        action: 'new',
+        targetLabel: null,
+        confidence: 0.65,
+        reason: `Topic "${activeTopic.label}" saturated (${activeTopic.messageCount} msgs) + ${Math.round(idleMs / 60000)}min idle + unrelated content`,
+      };
+    }
+  }
+
   // L2: LLM fallback for ambiguous cases
   const useHybrid = config.classifier.mode === 'hybrid' || config.classifier.mode === 'llm';
 
@@ -359,8 +381,7 @@ export async function classify(
       };
     }
 
-    // Default: stay on active topic (sticky sessions).
-    // New topics only via explicit /new command.
+    // Sticky session — saturation+idle auto-new is handled in L1.5 above
     return {
       action: 'continue',
       targetLabel: activeTopic.label,
