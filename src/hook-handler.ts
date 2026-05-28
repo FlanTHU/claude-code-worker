@@ -95,11 +95,15 @@ async function deriveDisplayName(
 ): Promise<string> {
   const fallback = deriveDisplayNameFallback(content);
 
-  if (!llmConfig?.apiKey) return fallback;
+  if (!llmConfig?.apiKey) {
+    log(`[hook-handler] deriveDisplayName: no apiKey, using fallback "${fallback}"`);
+    return fallback;
+  }
 
   const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
   const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
   const url = `${baseUrl}/chat/completions`;
+  log(`[hook-handler] deriveDisplayName: calling ${model} at ${baseUrl}`);
 
   const body = {
     model,
@@ -149,7 +153,8 @@ async function deriveDisplayName(
     }
     log(`[hook-handler] Display name LLM response not usable: "${raw.slice(0, 50)}"`);
     return fallback;
-  } catch {
+  } catch (err: any) {
+    log(`[hook-handler] deriveDisplayName error: ${err?.message ?? err}`);
     return fallback;
   } finally {
     clearTimeout(timer);
