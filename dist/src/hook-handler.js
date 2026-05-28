@@ -222,7 +222,16 @@ export async function handleBeforeDispatch(params) {
     // ── Dispatch via OpenClaw agent CLI with topic-isolated session ──
     const topicSessionId = `topic-${topicLabel}`;
     try {
-        const reply = await runAgentTurn(topicSessionId, content, log);
+        let reply;
+        try {
+            reply = await runAgentTurn(topicSessionId, content, log);
+        }
+        catch (firstErr) {
+            log(`[hook-handler] Agent call failed (attempt 1): ${firstErr?.message?.slice(0, 100)}`);
+            // Retry once after short delay
+            await new Promise(r => setTimeout(r, 2000));
+            reply = await runAgentTurn(topicSessionId, content, log);
+        }
         const topic = registry.get(topicLabel);
         const footer = config.replyFooter
             ? `\n\n---\n📌 话题: ${topic?.displayName ?? topicLabel}`
@@ -231,10 +240,8 @@ export async function handleBeforeDispatch(params) {
         return { handled: true, text: reply + footer };
     }
     catch (err) {
-        log(`[hook-handler] Agent call failed: ${err?.message ?? err}`);
-        return {
-            handled: true,
-            text: `⚠️ 话题 "${topicLabel}" 处理失败: ${err?.message ?? '未知错误'}\n\n---\n📌 话题: ${topicLabel}`,
-        };
+        log(`[hook-handler] Agent call failed after retry: ${err?.message?.slice(0, 150)}`);
+        // Don't block — let normal dispatch handle it
+        return undefined;
     }
 }
