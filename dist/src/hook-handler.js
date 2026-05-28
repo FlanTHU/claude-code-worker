@@ -1,18 +1,9 @@
 import { classify, generateTopicLabel } from './classifier.js';
 import { isTargetSession } from './utils.js';
 import { tryHandleCommand } from './commands.js';
-import { ConversationStore } from './conversation-store.js';
-import { callLLM } from './llm-client.js';
 const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
 const recentMessagesBySession = new Map();
-let conversationStore = null;
-function getConversationStore(stateDir) {
-    if (!conversationStore) {
-        conversationStore = new ConversationStore(stateDir);
-    }
-    return conversationStore;
-}
 function deriveDisplayName(content) {
     const trimmed = content.trim().replace(/\s+/g, ' ');
     const maxLen = 15;
@@ -21,7 +12,7 @@ function deriveDisplayName(content) {
     return trimmed.slice(0, maxLen) + '…';
 }
 export async function handleBeforeDispatch(params) {
-    const { event, ctx, registry, config, stateDir, llmConfig, log } = params;
+    const { event, ctx, registry, config, llmConfig, log } = params;
     const content = event.cleanedBody ?? event.content ?? event.body ?? '';
     const sessionKey = ctx?.sessionKey ?? event.sessionKey ?? '';
     log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}"`);
@@ -89,33 +80,12 @@ export async function handleBeforeDispatch(params) {
     }
     if (!topicLabel)
         return undefined;
-    // ── Direct LLM call with topic-isolated history ──
-    const store = getConversationStore(stateDir);
-    store.appendMessage(topicLabel, {
-        role: 'user',
-        content,
-        timestamp: Date.now(),
-    });
-    const history = store.getMessages(topicLabel);
-    try {
-        const reply = await callLLM(history, llmConfig, log);
-        store.appendMessage(topicLabel, {
-            role: 'assistant',
-            content: reply,
-            timestamp: Date.now(),
-        });
-        const topic = registry.get(topicLabel);
-        const footer = config.replyFooter
-            ? `\n\n---\n📌 话题: ${topic?.displayName ?? topicLabel}`
-            : '';
-        log(`[hook-handler] Claiming message, reply ${reply.length} chars for topic "${topicLabel}"`);
-        return { handled: true, text: reply + footer };
-    }
-    catch (err) {
-        log(`[hook-handler] LLM call failed: ${err?.message ?? err}`);
-        return {
-            handled: true,
-            text: `⚠️ 话题 "${topicLabel}" 回复失败: ${err?.message ?? '未知错误'}`,
-        };
-    }
+    // ── Route to topic-isolated session, let main agent handle the reply ──
+    const topic = registry.get(topicLabel);
+    const sessionKey_routed = topic?.sessionKey ?? `topic:${topicLabel}`;
+    log(`[hook-handler] Routing to session "${sessionKey_routed}" for topic "${topicLabel}"`);
+    return {
+        handled: false,
+        routeToSession: sessionKey_routed,
+    };
 }

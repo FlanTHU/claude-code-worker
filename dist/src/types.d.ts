@@ -56,4 +56,5 @@ export interface HookResult {
     handled: boolean;
     text?: string;
     routeToSession?: string;
+    topicLabel?: string;
 }

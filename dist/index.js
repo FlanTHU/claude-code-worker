@@ -165,8 +165,8 @@ export default definePluginEntry({
             },
         });
         // ── Topic classifier hook ──
-        // Claims messages (handled:true) and calls LLM directly with topic-isolated history.
-        // No longer relies on dispatch session routing — we ARE the responder.
+        // Classifies messages and routes to topic-isolated sessions.
+        // Main agent handles the actual reply.
         const llmConfig = {
             ...DEFAULT_LLM_CONFIG,
             ...(api.pluginConfig?.llm ?? {}),
@@ -174,7 +174,7 @@ export default definePluginEntry({
         if (!llmConfig.apiKey) {
             llmConfig.apiKey = process.env.MODEL_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
         }
-        log.info(`[topic-router] LLM config: ${llmConfig.baseUrl} model=${llmConfig.model}`);
+        log.info(`[topic-router] Classifier LLM: ${llmConfig.baseUrl} model=${llmConfig.model}`);
         const hookHandler = async (event, ctx) => {
             log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
             try {
