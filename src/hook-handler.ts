@@ -81,11 +81,70 @@ function resolveTopicFromQuote(
   return null;
 }
 
-function deriveDisplayName(content: string): string {
+function deriveDisplayNameFallback(content: string): string {
   const trimmed = content.trim().replace(/\s+/g, ' ');
   const maxLen = 15;
   if (trimmed.length <= maxLen) return trimmed;
   return trimmed.slice(0, maxLen) + '…';
+}
+
+async function deriveDisplayName(
+  content: string,
+  llmConfig: LLMConfig,
+  log: (...args: unknown[]) => void
+): Promise<string> {
+  const fallback = deriveDisplayNameFallback(content);
+
+  if (!llmConfig.apiKey) return fallback;
+
+  const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
+  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
+  const url = `${baseUrl}/chat/completions`;
+
+  const body = {
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: '你是话题命名器。根据用户消息生成一个简短的话题名称（2-4个词，中文优先）。只返回名称本身，不加引号或标点。例如："帮我写redis缓存代码"→"Redis缓存编码"，"明天北京下雨吗"→"北京天气"，"解释下量子纠缠"→"量子纠缠"',
+      },
+      { role: 'user', content: content.slice(0, 100) },
+    ],
+    max_tokens: 20,
+    temperature: 0.1,
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (llmConfig.apiKey) {
+      headers['Authorization'] = `Bearer ${llmConfig.apiKey}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return fallback;
+
+    const data = await response.json() as any;
+    const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
+
+    if (raw && raw.length <= 20 && raw.length >= 2) {
+      log(`[hook-handler] Generated display name: "${raw}"`);
+      return raw;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function handleBeforeDispatch(params: {
@@ -192,7 +251,7 @@ export async function handleBeforeDispatch(params: {
 
     case 'new': {
       const label = result.targetLabel ?? generateTopicLabel(content);
-      const displayName = deriveDisplayName(content);
+      const displayName = await deriveDisplayName(content, classifierLlmConfig, log);
       topicLabel = label;
       registry.getOrCreate(label, displayName);
       registry.setActive(label);
