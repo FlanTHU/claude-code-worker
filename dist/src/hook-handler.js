@@ -85,11 +85,11 @@ async function deriveDisplayName(content, llmConfig, log) {
             },
             { role: 'user', content: content.slice(0, 100) },
         ],
-        max_tokens: 20,
+        max_tokens: 200,
         temperature: 0.1,
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
+    const timer = setTimeout(() => controller.abort(), 5000);
     try {
         const headers = { 'Content-Type': 'application/json' };
         if (llmConfig.apiKey) {
@@ -101,14 +101,21 @@ async function deriveDisplayName(content, llmConfig, log) {
             body: JSON.stringify(body),
             signal: controller.signal,
         });
-        if (!response.ok)
+        if (!response.ok) {
+            log(`[hook-handler] Display name LLM HTTP ${response.status}`);
             return fallback;
-        const data = await response.json();
-        const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
-        if (raw && raw.length <= 20 && raw.length >= 2) {
-            log(`[hook-handler] Generated display name: "${raw}"`);
-            return raw;
         }
+        const data = await response.json();
+        const msg = data?.choices?.[0]?.message;
+        const raw = (msg?.content ?? msg?.reasoning_content ?? '').trim();
+        // Extract last line as the actual answer (reasoning models may prefix with thinking)
+        const lines = raw.split('\n').filter((l) => l.trim());
+        const answer = lines[lines.length - 1]?.trim() ?? '';
+        if (answer && answer.length <= 20 && answer.length >= 2) {
+            log(`[hook-handler] Generated display name: "${answer}"`);
+            return answer;
+        }
+        log(`[hook-handler] Display name LLM response not usable: "${raw.slice(0, 50)}"`);
         return fallback;
     }
     catch {
