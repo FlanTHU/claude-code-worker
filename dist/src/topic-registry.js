@@ -81,7 +81,7 @@ export class TopicRegistry {
             this.data.topics[normalized] = entry;
         }
         else {
-            if (displayName && entry.displayName === entry.label) {
+            if (displayName) {
                 entry.displayName = displayName;
             }
             entry.status = 'active';

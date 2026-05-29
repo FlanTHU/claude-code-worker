@@ -81,7 +81,8 @@ const handleSwitch = async ({ args, registry, log }) => {
 // ---------------------------------------------------------------------------
 const handleNew = async ({ args, registry, log }) => {
     const label = args.trim() || `topic-${Date.now().toString(36)}`;
-    const topic = registry.getOrCreate(label);
+    const topic = registry.getOrCreate(label, label);
+    topic.keywords = [];
     log(`[topic-router] Created new topic: ${label}`);
     return {
         handled: true,
