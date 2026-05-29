@@ -19,6 +19,7 @@ export declare class TopicRegistry {
     setActive(label: string): void;
     markInactive(label: string): void;
     markEnded(label: string): void;
+    setKeywords(label: string, keywords: string[]): void;
     learnKeywords(label: string, content: string): void;
     updateSummary(label: string, summary: string): void;
     /** Remove topics older than maxAgeMs. Returns count of pruned topics. */

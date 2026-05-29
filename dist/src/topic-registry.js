@@ -131,6 +131,19 @@ export class TopicRegistry {
         }
         this.save();
     }
+    setKeywords(label, keywords) {
+        const normalized = this.normalizeLabel(label);
+        this.reload();
+        const entry = this.data.topics[normalized];
+        if (!entry)
+            return;
+        const newKw = keywords.filter(k => !entry.keywords.includes(k));
+        entry.keywords.push(...newKw);
+        if (entry.keywords.length > 30) {
+            entry.keywords = entry.keywords.slice(-30);
+        }
+        this.save();
+    }
     learnKeywords(label, content) {
         const normalized = this.normalizeLabel(label);
         const entry = this.data.topics[normalized];

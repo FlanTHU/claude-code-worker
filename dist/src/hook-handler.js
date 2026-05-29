@@ -24,6 +24,60 @@ function resolveTopicFromQuote(quotedContent, registry, log) {
         return byPrefix.label;
     return null;
 }
+async function extractKeywords(content, existingKeywords, llmConfig, log) {
+    if (!llmConfig?.apiKey)
+        return [];
+    const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
+    const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
+    const url = `${baseUrl}/chat/completions`;
+    const body = {
+        model,
+        messages: [
+            {
+                role: 'system',
+                content: '你是关键词提取器。从用户消息中提取3-5个最有区分度的关键词/短语，用于话题匹配。要求：\n1. 提取名词、专有名词、技术术语为主\n2. 每个关键词2-6个字（中文）或一个英文单词\n3. 不要提取"帮我""请问""什么"等无意义词\n4. 只返回关键词，用逗号分隔，不加其他文字',
+            },
+            { role: 'user', content: content.slice(0, 200) },
+        ],
+        max_tokens: 100,
+        temperature: 0.1,
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (llmConfig.apiKey)
+            headers['Authorization'] = `Bearer ${llmConfig.apiKey}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+        if (!response.ok)
+            return [];
+        const data = await response.json();
+        const msg = data?.choices?.[0]?.message;
+        const raw = (msg?.content || msg?.reasoning_content || '').trim();
+        const lines = raw.split('\n').filter((l) => l.trim());
+        const answer = lines[lines.length - 1]?.trim() ?? '';
+        const keywords = answer
+            .split(/[,，、\s]+/)
+            .map((k) => k.trim())
+            .filter((k) => k.length >= 2 && k.length <= 10 && !existingKeywords.includes(k));
+        if (keywords.length > 0) {
+            log(`[hook-handler] LLM keywords: ${keywords.join(', ')}`);
+            return keywords.slice(0, 5);
+        }
+        return [];
+    }
+    catch {
+        return [];
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
 function deriveDisplayNameFallback(content) {
     const trimmed = content.trim().replace(/\s+/g, ' ');
     const maxLen = 15;
@@ -148,7 +202,6 @@ export async function handleBeforeDispatch(params) {
                 return undefined;
             topicLabel = result.targetLabel;
             registry.getOrCreate(topicLabel);
-            registry.learnKeywords(topicLabel, content);
             break;
         }
         case 'switch': {
@@ -161,7 +214,6 @@ export async function handleBeforeDispatch(params) {
             }
             topicLabel = result.targetLabel;
             registry.setActive(topicLabel);
-            registry.learnKeywords(topicLabel, content);
             break;
         }
         case 'new': {
@@ -170,7 +222,6 @@ export async function handleBeforeDispatch(params) {
             topicLabel = label;
             registry.getOrCreate(label, displayName);
             registry.setActive(label);
-            registry.learnKeywords(label, content);
             break;
         }
         default:
@@ -178,6 +229,14 @@ export async function handleBeforeDispatch(params) {
     }
     if (!topicLabel)
         return undefined;
+    // ── Learn keywords via LLM (fire-and-forget, don't block routing) ──
+    const existingTopic = registry.get(topicLabel);
+    const existingKw = existingTopic?.keywords ?? [];
+    extractKeywords(content, existingKw, classifierLlmConfig, log).then(keywords => {
+        if (keywords.length > 0) {
+            registry.setKeywords(topicLabel, keywords);
+        }
+    }).catch(() => { });
     // ── Session routing: mutate ctx.sessionKey to topic session ──
     const topic = registry.get(topicLabel);
     if (topic) {
