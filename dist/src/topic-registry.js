@@ -80,8 +80,11 @@ export class TopicRegistry {
             };
             this.data.topics[normalized] = entry;
         }
-        else if (displayName && entry.displayName === entry.label) {
-            entry.displayName = displayName;
+        else {
+            if (displayName && entry.displayName === entry.label) {
+                entry.displayName = displayName;
+            }
+            entry.status = 'active';
         }
         entry.lastActiveAt = Date.now();
         entry.messageCount++;
