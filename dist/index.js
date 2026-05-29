@@ -171,7 +171,7 @@ export default definePluginEntry({
             model: 'xiaomi/mimo-v2.5-pro-mit',
             apiKey,
         };
-        log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: openclaw agent CLI`);
+        log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: session routing (full agent pipeline)`);
         const hookHandler = async (event, ctx) => {
             log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
             try {
@@ -192,6 +192,31 @@ export default definePluginEntry({
             }
         };
         api.on('before_dispatch', hookHandler);
+        // ── Output hook: append topic footer to replies from topic sessions ──
+        if (pluginConfig.replyFooter) {
+            const outputHandler = (event, ctx) => {
+                const sessionKey = ctx?.sessionKey || '';
+                if (!sessionKey.includes(':topic:'))
+                    return;
+                const label = sessionKey.split(':topic:')[1];
+                if (!label)
+                    return;
+                const topic = registry.get(label);
+                const displayName = topic?.displayName ?? label;
+                if (event.text && typeof event.text === 'string') {
+                    event.text = event.text + `\n\n---\n📌 话题: ${displayName}`;
+                }
+                if (event.payloads && Array.isArray(event.payloads)) {
+                    for (const payload of event.payloads) {
+                        if (payload.text && typeof payload.text === 'string') {
+                            payload.text = payload.text + `\n\n---\n📌 话题: ${displayName}`;
+                        }
+                    }
+                }
+            };
+            api.on('llm_output', outputHandler);
+            api.on('agent_end', outputHandler);
+        }
         log.info(`Plugin initialized (mode=${pluginConfig.classifier.mode}, maxTopics=${pluginConfig.maxTopics}, target=${pluginConfig.targetSessionKey})`);
     },
 });

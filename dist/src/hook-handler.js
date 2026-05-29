@@ -1,18 +1,9 @@
 import { classify, generateTopicLabel } from './classifier.js';
 import { isTargetSession } from './utils.js';
 import { tryHandleCommand } from './commands.js';
-import { callLLM } from './llm-client.js';
-import { ConversationStore } from './conversation-store.js';
 const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
 const recentMessagesBySession = new Map();
-let conversationStore = null;
-function getConversationStore(stateDir) {
-    if (!conversationStore) {
-        conversationStore = new ConversationStore(stateDir);
-    }
-    return conversationStore;
-}
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
 function resolveTopicFromQuote(quotedContent, registry, log) {
     if (!quotedContent)
@@ -31,7 +22,6 @@ function resolveTopicFromQuote(quotedContent, registry, log) {
     const byPrefix = allTopics.find(t => footerValue.endsWith('…') && t.displayName.startsWith(footerValue.slice(0, -1)));
     if (byPrefix)
         return byPrefix.label;
-    log(`[hook-handler] Topic from footer "${footerValue}" not found in registry`);
     return null;
 }
 function deriveDisplayNameFallback(content) {
@@ -43,9 +33,8 @@ function deriveDisplayNameFallback(content) {
 }
 async function deriveDisplayName(content, llmConfig, log) {
     const fallback = deriveDisplayNameFallback(content);
-    if (!llmConfig?.apiKey) {
+    if (!llmConfig?.apiKey)
         return fallback;
-    }
     const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
     const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
     const url = `${baseUrl}/chat/completions`;
@@ -65,9 +54,8 @@ async function deriveDisplayName(content, llmConfig, log) {
     const timer = setTimeout(() => controller.abort(), 3000);
     try {
         const headers = { 'Content-Type': 'application/json' };
-        if (llmConfig.apiKey) {
+        if (llmConfig.apiKey)
             headers['Authorization'] = `Bearer ${llmConfig.apiKey}`;
-        }
         const response = await fetch(url, {
             method: 'POST',
             headers,
@@ -94,10 +82,17 @@ async function deriveDisplayName(content, llmConfig, log) {
         clearTimeout(timer);
     }
 }
+/**
+ * Session routing approach:
+ * - Classify message → determine topic
+ * - Mutate ctx.sessionKey to route to topic-isolated session
+ * - Return undefined (not handled) → gateway processes with full tools/skills
+ * - Footer added via separate output hook
+ */
 export async function handleBeforeDispatch(params) {
-    const { event, registry, config, classifierLlmConfig, log } = params;
+    const { event, ctx, registry, config, classifierLlmConfig, log } = params;
     const content = event.cleanedBody || event.content || event.body || '';
-    const sessionKey = params.ctx?.sessionKey || event.sessionKey || '';
+    const sessionKey = ctx?.sessionKey || event.sessionKey || '';
     const quotedContent = event.quotedMessage || event.quotedContent
         || event.replyContent || event.quote || event.parentContent
         || event.replyText || event.quoteText || '';
@@ -114,6 +109,7 @@ export async function handleBeforeDispatch(params) {
         return undefined;
     }
     const trimmed = content.trim();
+    // Commands are handled directly (they return text, no routing needed)
     if (/^\/(topics|switch|newtopic|new|endall|end)\b/i.test(trimmed)) {
         const cmdResult = await tryHandleCommand(content, registry, config, log);
         if (cmdResult)
@@ -182,34 +178,13 @@ export async function handleBeforeDispatch(params) {
     }
     if (!topicLabel)
         return undefined;
-    // ── Call LLM with per-topic conversation history ──
-    const store = getConversationStore(params.stateDir);
-    store.appendMessage(topicLabel, {
-        role: 'user',
-        content,
-        timestamp: Date.now(),
-    });
-    const history = store.getMessages(topicLabel);
-    const llmConfig = {
-        ...classifierLlmConfig,
-        systemPrompt: '你是一个有用的AI助手。请根据对话历史回答用户的问题。',
-    };
-    try {
-        const reply = await callLLM(history, llmConfig, log);
-        store.appendMessage(topicLabel, {
-            role: 'assistant',
-            content: reply,
-            timestamp: Date.now(),
-        });
-        const topic = registry.get(topicLabel);
-        const footer = config.replyFooter
-            ? `\n\n---\n📌 话题: ${topic?.displayName ?? topicLabel}`
-            : '';
-        log(`[hook-handler] LLM reply ${reply.length} chars for topic "${topicLabel}"`);
-        return { handled: true, text: reply + footer };
+    // ── Session routing: mutate ctx.sessionKey to topic session ──
+    const topic = registry.get(topicLabel);
+    if (topic) {
+        const newSessionKey = topic.sessionKey;
+        log(`[hook-handler] Routing to topic session: ${sessionKey} → ${newSessionKey}`);
+        ctx.sessionKey = newSessionKey;
     }
-    catch (err) {
-        log(`[hook-handler] LLM call failed: ${err?.message?.slice(0, 150)}`);
-        return undefined;
-    }
+    // Return undefined = not handled, gateway processes normally but with new sessionKey
+    return undefined;
 }
