@@ -132,69 +132,8 @@ export default definePluginEntry({
       },
     });
 
-    api.registerCommand({
-      name: 'newtopic',
-      description: '创建新话题',
-      acceptsArgs: true,
-      channels: ['feishu'],
-      handler: async (ctx: any) => {
-        const label = (ctx.args ?? '').trim() || `topic-${Date.now().toString(36)}`;
-        const topic = registry.getOrCreate(label);
-
-        cmdLog(`Created new topic: ${label}`);
-
-        return {
-          text: `✅ 已创建新话题 **${topic.displayName}** (${topic.label})\n\nSession: \`${topic.sessionKey}\`\n后续消息将自动路由到此话题。`,
-        };
-      },
-    });
-
-    api.registerCommand({
-      name: 'end',
-      description: '结束当前或指定话题',
-      acceptsArgs: true,
-      channels: ['feishu'],
-      handler: async (ctx: any) => {
-        const label = (ctx.args ?? '').trim();
-        const target = label || registry.getActive()?.label;
-
-        if (!target) {
-          return { text: '⚠️ 当前没有活跃话题。' };
-        }
-
-        const topic = registry.get(target);
-        if (!topic) {
-          return { text: `⚠️ 未找到话题 "${target}"。` };
-        }
-
-        registry.markEnded(target);
-        cmdLog(`Ended topic: ${target}`);
-
-        return {
-          text: `✅ 已结束话题 **${topic.displayName}** (${topic.label})\n\n后续消息将回到主 session。`,
-        };
-      },
-    });
-
-    api.registerCommand({
-      name: 'endall',
-      description: '清理全部话题',
-      acceptsArgs: false,
-      channels: ['feishu'],
-      handler: async (_ctx: any) => {
-        const all = registry.getAll();
-        if (all.length === 0) {
-          return { text: '⚠️ 当前没有话题。' };
-        }
-        for (const topic of all) {
-          registry.markEnded(topic.label);
-        }
-        cmdLog(`Ended all ${all.length} topics`);
-        return {
-          text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
-        };
-      },
-    });
+    // /newtopic, /new, /end, /endall are handled via before_dispatch → commands.ts
+    // (not registered as gateway commands to avoid "new" reserved name conflict)
 
     // ── Topic classifier hook ──
     // Classifier uses mimo (fast, cheap). Reply dispatches via openclaw agent CLI (full pipeline).
