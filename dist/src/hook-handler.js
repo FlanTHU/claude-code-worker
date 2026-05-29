@@ -245,7 +245,8 @@ export async function handleBeforeDispatch(params) {
     }
     if (!topicLabel)
         return undefined;
-    // ── Learn keywords via LLM (fire-and-forget, don't block routing) ──
+    // ── Learn keywords: rule-based instant + LLM async refinement ──
+    registry.learnKeywords(topicLabel, content);
     const existingTopic = registry.get(topicLabel);
     const existingKw = existingTopic?.keywords ?? [];
     extractKeywords(content, existingKw, classifierLlmConfig, log).then(keywords => {
