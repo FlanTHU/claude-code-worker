@@ -1,19 +1,40 @@
 #!/bin/bash
 # Bootstrap topic-router plugin on a fresh OpenClaw container.
-# Usage: curl/copy this script to container, then run:
-#   bash bootstrap.sh
+#
+# ⚠️  DESTRUCTIVE: kills gateway, patches /app/dist/ JS, modifies openclaw.json.
+#     Do NOT run on a container that is actively serving users unless you intend
+#     to restart. Use redeploy.sh for code-only updates without re-patching.
+#
+# Usage (fresh container):
+#   git clone -b v2-direct-llm https://github.com/FlanTHU/claude-code-worker.git /tmp/tr
+#   bash /tmp/tr/openclaw-topic-router/bootstrap.sh
+#
+# Usage (existing container, force restart):
+#   FORCE_BOOTSTRAP=1 bash bootstrap.sh
 #
 # Prerequisites:
 #   - OpenClaw gateway installed at /app/dist/
 #   - Git available
 #   - Container has network access to github.com
+#   - Gateway process owner: node user (runuser -u node)
 set -e
 
-REPO_URL="git@github.com:FlanTHU/claude-code-worker.git"
+REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
 REPO_DIR="/root/.openclaw/workspace/code-repo/openclaw-topic-router"
 EXT_DIR="/app/dist/extensions/topic-router"
 BRANCH="v2-direct-llm"
 STATE_DIR="/tmp/topic-router-state"
+
+# Safety check: refuse to run if gateway is currently serving traffic
+if [ "${FORCE_BOOTSTRAP:-}" != "1" ]; then
+  if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
+    echo "⚠️  Gateway is running. This script will restart it."
+    echo "   Set FORCE_BOOTSTRAP=1 to proceed, or use redeploy.sh for hot-reload."
+    echo ""
+    echo "   FORCE_BOOTSTRAP=1 bash bootstrap.sh"
+    exit 1
+  fi
+fi
 
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Topic Router — One-Click Bootstrap        ║"
