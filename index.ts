@@ -191,32 +191,41 @@ export default definePluginEntry({
 
         log.info(`[topic-router-output] Appending footer for topic "${label}" (${displayName})`);
 
-        // Try multiple known event shapes
+        // llm_output shape: {assistantTexts: string[], lastAssistant: string, ...}
+        if (event.lastAssistant && typeof event.lastAssistant === 'string') {
+          event.lastAssistant = event.lastAssistant + footer;
+        }
+        if (event.assistantTexts && Array.isArray(event.assistantTexts)) {
+          const last = event.assistantTexts.length - 1;
+          if (last >= 0 && typeof event.assistantTexts[last] === 'string') {
+            event.assistantTexts[last] = event.assistantTexts[last] + footer;
+          }
+        }
+
+        // agent_end shape: {messages: Array<{role, content}>, ...}
+        if (event.messages && Array.isArray(event.messages)) {
+          for (let i = event.messages.length - 1; i >= 0; i--) {
+            const msg = event.messages[i];
+            if (msg?.role === 'assistant' && typeof msg.content === 'string') {
+              msg.content = msg.content + footer;
+              break;
+            }
+            if (msg?.role === 'assistant' && Array.isArray(msg.content)) {
+              const textPart = msg.content.find((p: any) => p.type === 'text' && typeof p.text === 'string');
+              if (textPart) {
+                textPart.text = textPart.text + footer;
+                break;
+              }
+            }
+          }
+        }
+
+        // Fallback: generic text/content fields
         if (event.text && typeof event.text === 'string') {
           event.text = event.text + footer;
         }
         if (event.content && typeof event.content === 'string') {
           event.content = event.content + footer;
-        }
-        if (event.message && typeof event.message === 'string') {
-          event.message = event.message + footer;
-        }
-        if (event.payloads && Array.isArray(event.payloads)) {
-          for (const payload of event.payloads) {
-            if (payload.text && typeof payload.text === 'string') {
-              payload.text = payload.text + footer;
-            }
-            if (payload.content && typeof payload.content === 'string') {
-              payload.content = payload.content + footer;
-            }
-          }
-        }
-        // Feishu card content
-        if (event.card && event.card.elements && Array.isArray(event.card.elements)) {
-          event.card.elements.push({
-            tag: 'markdown',
-            content: `---\n📌 话题: ${displayName}`,
-          });
         }
       };
       api.on('llm_output', outputHandler);
