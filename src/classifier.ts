@@ -140,7 +140,7 @@ export function detectContinuation(
 // LLM-based classification
 // ---------------------------------------------------------------------------
 
-const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息属于哪个话题。continue=当前话题，switch=切到另一个已有话题。不确定选continue。只返回JSON：{"action":"continue|switch","label":"话题label","reason":"原因"}`;
+const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 
 async function classifyWithLLM(
   content: string,
@@ -215,9 +215,18 @@ ${recentCtx}
 
     const parsed = JSON.parse(jsonMatch[0]);
     const action = parsed.action as ClassifyResult['action'];
-    if (!['continue', 'switch'].includes(action)) return null;
+    if (!['continue', 'switch', 'new'].includes(action)) return null;
 
     let targetLabel: string | null = parsed.label || null;
+
+    if (action === 'new') {
+      return {
+        action: 'new',
+        targetLabel: null,
+        confidence: 0.75,
+        reason: `LLM: ${parsed.reason ?? 'unrelated to all topics'}`,
+      };
+    }
 
     // Validate switch target exists
     if (action === 'switch' && targetLabel) {
@@ -306,25 +315,46 @@ export async function classify(
     return continuationResult;
   }
 
-  // L1.5: Saturation check — auto-create new topic if active topic is "full" + long idle + unrelated
+  // L1.5: Auto-new checks (before LLM fallback)
   if (activeTopic && activeTopic.messageCount > 0) {
     const idleMs = Date.now() - activeTopic.lastActiveAt;
-    const IDLE_THRESHOLD = 30 * 60 * 1000; // 30 minutes
-    const MSG_THRESHOLD = 8;
     const msgLower = content.toLowerCase();
     const hasKeywordOverlap = activeTopic.keywords.length > 0 &&
       activeTopic.keywords.some(kw => msgLower.includes(kw.toLowerCase()));
     const trimmedForCheck = content.trim();
     const isSubstantial = (trimmedForCheck.length > 6 && /[？?。！!]/.test(trimmedForCheck)) || trimmedForCheck.length > 15;
 
+    // Rule A: Saturation — topic has many messages + idle for a while + unrelated
+    const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    const MSG_THRESHOLD = 3;
     if (activeTopic.messageCount >= MSG_THRESHOLD && idleMs >= IDLE_THRESHOLD && !hasKeywordOverlap && isSubstantial) {
-      _log(`[classifier] Auto-new: msgs=${activeTopic.messageCount}, idle=${Math.round(idleMs / 60000)}min, len=${trimmedForCheck.length}`);
+      _log(`[classifier] Auto-new (saturation): msgs=${activeTopic.messageCount}, idle=${Math.round(idleMs / 60000)}min`);
       return {
         action: 'new',
         targetLabel: null,
         confidence: 0.65,
-        reason: `Topic "${activeTopic.label}" saturated (${activeTopic.messageCount} msgs) + ${Math.round(idleMs / 60000)}min idle + unrelated content`,
+        reason: `Topic "${activeTopic.label}" saturated (${activeTopic.messageCount} msgs) + ${Math.round(idleMs / 60000)}min idle + unrelated`,
       };
+    }
+
+    // Rule B: Zero overlap — topic has enough keywords to judge relevance, message is clearly unrelated
+    const KEYWORD_MATURITY = 5;
+    if (activeTopic.keywords.length >= KEYWORD_MATURITY && !hasKeywordOverlap && isSubstantial) {
+      // Also check no overlap with ANY other topic (truly new subject)
+      const anyOtherOverlap = allTopics.some(t =>
+        t.label !== activeTopic!.label &&
+        t.keywords.length > 0 &&
+        t.keywords.some(kw => msgLower.includes(kw.toLowerCase()))
+      );
+      if (!anyOtherOverlap) {
+        _log(`[classifier] Auto-new (zero-overlap): ${activeTopic.keywords.length} keywords, 0 hits, substantial msg`);
+        return {
+          action: 'new',
+          targetLabel: null,
+          confidence: 0.6,
+          reason: `No keyword overlap with any topic (active has ${activeTopic.keywords.length} keywords) + substantial message`,
+        };
+      }
     }
   }
 
