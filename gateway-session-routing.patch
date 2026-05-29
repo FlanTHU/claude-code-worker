@@ -1,0 +1,56 @@
+diff --git a/src/auto-reply/reply/dispatch-from-config.ts b/src/auto-reply/reply/dispatch-from-config.ts
+index 0e07cbcb..810f4ff4 100644
+--- a/src/auto-reply/reply/dispatch-from-config.ts
++++ b/src/auto-reply/reply/dispatch-from-config.ts
+@@ -490,7 +490,7 @@ async function dispatchReplyFromConfigImpl(
+ 
+   const initialSessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
+   const boundAcpDispatchSessionKey = resolveBoundAcpDispatchSessionKey({ ctx, cfg });
+-  const acpDispatchSessionKey =
++  let acpDispatchSessionKey =
+     boundAcpDispatchSessionKey ?? initialSessionStoreEntry.sessionKey ?? sessionKey;
+   const markProgress = () => {
+     if (!canTrackSession || !sessionKey) {
+@@ -501,11 +501,11 @@ async function dispatchReplyFromConfigImpl(
+       markDiagnosticSessionProgress({ sessionKey: acpDispatchSessionKey });
+     }
+   };
+-  const sessionStoreEntry = boundAcpDispatchSessionKey
++  let sessionStoreEntry = boundAcpDispatchSessionKey
+     ? resolveSessionStoreLookup({ ...ctx, SessionKey: boundAcpDispatchSessionKey }, cfg)
+     : initialSessionStoreEntry;
+-  const sessionAgentId = resolveSessionAgentId({ sessionKey: acpDispatchSessionKey, config: cfg });
+-  const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
++  let sessionAgentId = resolveSessionAgentId({ sessionKey: acpDispatchSessionKey, config: cfg });
++  let sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
+   const shouldEmitVerboseProgress = createShouldEmitVerboseProgress({
+     sessionKey: acpDispatchSessionKey,
+     storePath: sessionStoreEntry.storePath,
+@@ -1165,6 +1165,15 @@ async function dispatchReplyFromConfigImpl(
+           commitInboundDedupeIfClaimed();
+           return attachSourceReplyDeliveryMode({ queuedFinal, counts });
+         }
++
++        // Session re-routing: plugin can redirect to a different session
++        if (beforeDispatchResult?.sessionKey && beforeDispatchResult.sessionKey !== acpDispatchSessionKey) {
++          acpDispatchSessionKey = beforeDispatchResult.sessionKey;
++          sessionStoreEntry = resolveSessionStoreLookup({ ...ctx, SessionKey: acpDispatchSessionKey }, cfg);
++          sessionAgentId = resolveSessionAgentId({ sessionKey: acpDispatchSessionKey, config: cfg });
++          sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
++          logVerbose(`[before_dispatch] session re-routed to: ${acpDispatchSessionKey}`);
++        }
+       }
+ 
+       if (hookRunner?.hasHooks("reply_dispatch")) {
+diff --git a/src/plugins/hook-types.ts b/src/plugins/hook-types.ts
+index f39a4e25..c1258c0f 100644
+--- a/src/plugins/hook-types.ts
++++ b/src/plugins/hook-types.ts
+@@ -366,6 +366,7 @@ export type PluginHookBeforeDispatchContext = {
+ export type PluginHookBeforeDispatchResult = {
+   handled: boolean;
+   text?: string;
++  sessionKey?: string;
+ };
+ 
+ export type PluginHookReplyDispatchEvent = {
