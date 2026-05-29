@@ -232,28 +232,58 @@ export default definePluginEntry({
     // ── Output hook: append topic footer to replies from topic sessions ──
     if (pluginConfig.replyFooter) {
       const outputHandler = (event: any, ctx: any) => {
-        const sessionKey: string = ctx?.sessionKey || '';
-        if (!sessionKey.includes(':topic:')) return;
+        const sessionKey: string = ctx?.sessionKey || event?.sessionKey || '';
+        log.info(`[topic-router-output] hook fired. sessionKey="${sessionKey}" eventKeys=${JSON.stringify(Object.keys(event ?? {}))} ctxKeys=${JSON.stringify(Object.keys(ctx ?? {}))}`);
 
-        const label = sessionKey.split(':topic:')[1];
+        // Try to find topic label from session key or registry active
+        let label: string | undefined;
+        if (sessionKey.includes(':topic:')) {
+          label = sessionKey.split(':topic:')[1];
+        }
+        if (!label) {
+          const active = registry.getActive();
+          if (active) label = active.label;
+        }
         if (!label) return;
 
         const topic = registry.get(label);
         const displayName = topic?.displayName ?? label;
+        const footer = `\n\n---\n📌 话题: ${displayName}`;
 
+        log.info(`[topic-router-output] Appending footer for topic "${label}" (${displayName})`);
+
+        // Try multiple known event shapes
         if (event.text && typeof event.text === 'string') {
-          event.text = event.text + `\n\n---\n📌 话题: ${displayName}`;
+          event.text = event.text + footer;
+        }
+        if (event.content && typeof event.content === 'string') {
+          event.content = event.content + footer;
+        }
+        if (event.message && typeof event.message === 'string') {
+          event.message = event.message + footer;
         }
         if (event.payloads && Array.isArray(event.payloads)) {
           for (const payload of event.payloads) {
             if (payload.text && typeof payload.text === 'string') {
-              payload.text = payload.text + `\n\n---\n📌 话题: ${displayName}`;
+              payload.text = payload.text + footer;
+            }
+            if (payload.content && typeof payload.content === 'string') {
+              payload.content = payload.content + footer;
             }
           }
+        }
+        // Feishu card content
+        if (event.card && event.card.elements && Array.isArray(event.card.elements)) {
+          event.card.elements.push({
+            tag: 'markdown',
+            content: `---\n📌 话题: ${displayName}`,
+          });
         }
       };
       api.on('llm_output', outputHandler);
       api.on('agent_end', outputHandler);
+      api.on('before_reply', outputHandler);
+      api.on('reply', outputHandler);
     }
 
     log.info(`Plugin initialized (mode=${pluginConfig.classifier.mode}, maxTopics=${pluginConfig.maxTopics}, target=${pluginConfig.targetSessionKey})`);

@@ -183,8 +183,16 @@ export async function handleBeforeDispatch(params) {
     if (topic) {
         const newSessionKey = topic.sessionKey;
         log(`[hook-handler] Routing to topic session: ${sessionKey} → ${newSessionKey}`);
+        // Strategy 1: Mutate ctx.sessionKey (if gateway reads it before dispatch)
         ctx.sessionKey = newSessionKey;
+        // Strategy 2: Also set on event in case gateway reads from there
+        event.sessionKey = newSessionKey;
+        // Strategy 3: Return routeToSession in result (if gateway supports it)
+        return {
+            handled: false,
+            routeToSession: newSessionKey,
+            topicLabel,
+        };
     }
-    // Return undefined = not handled, gateway processes normally but with new sessionKey
     return undefined;
 }
