@@ -20,7 +20,7 @@ const DEFAULT_CONFIG: TopicRouterConfig = {
 
 const DEFAULT_LLM_CONFIG: LLMConfig = {
   baseUrl: 'http://model.mify.ai.srv/v1',
-  model: 'xiaomi/mimo-v2.5-pro-mit',
+  model: 'xiaomi/mimo-v2.5-mit',
 };
 
 export default definePluginEntry({
@@ -141,7 +141,7 @@ export default definePluginEntry({
 
     const classifierLlmConfig: LLMConfig = {
       baseUrl: 'http://model.mify.ai.srv/v1',
-      model: 'xiaomi/mimo-v2.5-pro-mit',
+      model: 'xiaomi/mimo-v2.5-mit',
       apiKey,
     };
 

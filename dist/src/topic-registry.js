@@ -194,6 +194,15 @@ export class TopicRegistry {
         }
         this.save();
     }
+    updateDisplayName(label, displayName) {
+        const normalized = this.normalizeLabel(label);
+        this.reload();
+        const entry = this.data.topics[normalized];
+        if (!entry)
+            return;
+        entry.displayName = displayName;
+        this.save();
+    }
     updateSummary(label, summary) {
         const normalized = this.normalizeLabel(label);
         const entry = this.data.topics[normalized];

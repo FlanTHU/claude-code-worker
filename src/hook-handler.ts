@@ -48,7 +48,7 @@ async function extractKeywords(
   if (!llmConfig?.apiKey) return [];
 
   const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
+  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
   const url = `${baseUrl}/chat/completions`;
 
   const body = {
@@ -56,16 +56,16 @@ async function extractKeywords(
     messages: [
       {
         role: 'system',
-        content: '你是关键词提取器。从用户消息中提取3-5个最有区分度的关键词/短语，用于话题匹配。要求：\n1. 提取名词、专有名词、技术术语为主\n2. 每个关键词2-6个字（中文）或一个英文单词\n3. 不要提取"帮我""请问""什么"等无意义词\n4. 只返回关键词，用逗号分隔，不加其他文字',
+        content: '提取3-5个关键词，逗号分隔，只返回关键词。要求：名词/术语为主，2-6字，不要"帮我""请问"等虚词。',
       },
       { role: 'user', content: content.slice(0, 200) },
     ],
-    max_tokens: 100,
+    max_tokens: 2000,
     temperature: 0.1,
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3000);
+  const timer = setTimeout(() => controller.abort(), 30000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -82,18 +82,24 @@ async function extractKeywords(
 
     const data = await response.json() as any;
     const msg = data?.choices?.[0]?.message;
-    const raw = (msg?.content || msg?.reasoning_content || '').trim();
+    const contentText = (msg?.content ?? '').trim();
+    const reasoningText = (msg?.reasoning_content ?? '').trim();
 
+    // mimo reasoning model: content may be empty, answer buried in reasoning_content's last line
+    const raw = contentText || reasoningText;
+    if (!raw) return [];
+
+    // Try to find comma-separated keywords in the last non-empty line
     const lines = raw.split('\n').filter((l: string) => l.trim());
     const answer = lines[lines.length - 1]?.trim() ?? '';
 
     const keywords = answer
       .split(/[,，、\s]+/)
-      .map((k: string) => k.trim())
+      .map((k: string) => k.trim().replace(/^["""]+|["""]+$/g, ''))
       .filter((k: string) => k.length >= 2 && k.length <= 10 && !existingKeywords.includes(k));
 
     if (keywords.length > 0) {
-      log(`[hook-handler] LLM keywords: ${keywords.join(', ')}`);
+      log(`[hook-handler] LLM keywords (from ${contentText ? 'content' : 'reasoning'}): ${keywords.join(', ')}`);
       return keywords.slice(0, 5);
     }
     return [];
@@ -121,7 +127,7 @@ async function deriveDisplayName(
   if (!llmConfig?.apiKey) return fallback;
 
   const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
+  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
   const url = `${baseUrl}/chat/completions`;
 
   const body = {
@@ -129,16 +135,16 @@ async function deriveDisplayName(
     messages: [
       {
         role: 'system',
-        content: '你是话题命名器。根据用户消息生成一个简短的话题名称（2-4个词，中文优先）。只返回名称本身，不加引号或标点。例如："帮我写redis缓存代码"→"Redis缓存编码"，"明天北京下雨吗"→"北京天气"，"解释下量子纠缠"→"量子纠缠"',
+        content: '用2-4个词命名话题，只返回名称。例：帮我写redis缓存代码→Redis缓存编码，明天北京下雨吗→北京天气',
       },
       { role: 'user', content: content.slice(0, 100) },
     ],
-    max_tokens: 200,
+    max_tokens: 2000,
     temperature: 0.1,
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3000);
+  const timer = setTimeout(() => controller.abort(), 30000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -155,13 +161,16 @@ async function deriveDisplayName(
 
     const data = await response.json() as any;
     const msg = data?.choices?.[0]?.message;
-    const raw = (msg?.content || msg?.reasoning_content || '').trim();
+    const contentText = (msg?.content ?? '').trim();
+    const reasoningText = (msg?.reasoning_content ?? '').trim();
+    const raw = contentText || reasoningText;
+    if (!raw) return fallback;
 
     const lines = raw.split('\n').filter((l: string) => l.trim());
-    const answer = lines[lines.length - 1]?.trim() ?? '';
+    const answer = lines[lines.length - 1]?.trim().replace(/^["""]+|["""]+$/g, '') ?? '';
 
     if (answer && answer.length <= 20 && answer.length >= 2) {
-      log(`[hook-handler] Generated display name: "${answer}"`);
+      log(`[hook-handler] Generated display name: "${answer}" (from ${contentText ? 'content' : 'reasoning'})`);
       return answer;
     }
     return fallback;
@@ -275,10 +284,16 @@ export async function handleBeforeDispatch(params: {
 
     case 'new': {
       const label = result.targetLabel ?? generateTopicLabel(content);
-      const displayName = await deriveDisplayName(content, classifierLlmConfig, log);
+      const fallbackName = deriveDisplayNameFallback(content);
       topicLabel = label;
-      registry.getOrCreate(label, displayName);
+      registry.getOrCreate(label, fallbackName);
       registry.setActive(label);
+      // Derive better display name async (fire-and-forget, ~20s for mimo)
+      deriveDisplayName(content, classifierLlmConfig, log).then(name => {
+        if (name !== fallbackName) {
+          registry.updateDisplayName(label, name);
+        }
+      }).catch(() => {});
       break;
     }
 

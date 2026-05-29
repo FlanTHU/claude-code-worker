@@ -1,7 +1,7 @@
 import type { ChatMessage } from './conversation-store.js';
 
 const DEFAULT_BASE_URL = 'http://model.mify.ai.srv/v1';
-const DEFAULT_MODEL = 'xiaomi/mimo-v2.5-pro-mit';
+const DEFAULT_MODEL = 'xiaomi/mimo-v2.5-mit';
 const REQUEST_TIMEOUT_MS = 60000;
 
 export interface LLMConfig {

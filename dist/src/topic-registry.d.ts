@@ -21,6 +21,7 @@ export declare class TopicRegistry {
     markEnded(label: string): void;
     setKeywords(label: string, keywords: string[]): void;
     learnKeywords(label: string, content: string): void;
+    updateDisplayName(label: string, displayName: string): void;
     updateSummary(label: string, summary: string): void;
     /** Remove topics older than maxAgeMs. Returns count of pruned topics. */
     prune(maxAgeMs?: number): number;

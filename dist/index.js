@@ -14,7 +14,7 @@ const DEFAULT_CONFIG = {
 };
 const DEFAULT_LLM_CONFIG = {
     baseUrl: 'http://model.mify.ai.srv/v1',
-    model: 'xiaomi/mimo-v2.5-pro-mit',
+    model: 'xiaomi/mimo-v2.5-mit',
 };
 export default definePluginEntry({
     id: 'topic-router',
@@ -115,7 +115,7 @@ export default definePluginEntry({
         const apiKey = process.env.MODEL_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
         const classifierLlmConfig = {
             baseUrl: 'http://model.mify.ai.srv/v1',
-            model: 'xiaomi/mimo-v2.5-pro-mit',
+            model: 'xiaomi/mimo-v2.5-mit',
             apiKey,
         };
         log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: session routing (full agent pipeline)`);

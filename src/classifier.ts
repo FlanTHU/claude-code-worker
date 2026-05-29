@@ -140,19 +140,7 @@ export function detectContinuation(
 // LLM-based classification
 // ---------------------------------------------------------------------------
 
-const CLASSIFY_SYSTEM_PROMPT = `你是一个话题分类器。根据用户的新消息和已有话题列表，判断消息应路由到哪个话题。
-
-规则：
-1. "continue" — 消息属于当前活跃话题（追问、补充、延续，或无法确定归属时默认选此）
-2. "switch" — 消息明确与某个已有（非活跃）话题相关，指定该话题的 label
-
-判断要点：
-- 优先 continue：如果消息与当前活跃话题有任何关联性，选 continue
-- 只有消息明确属于另一个已存在的话题时才选 switch
-- 不确定时选 continue（用户可通过命令手动切换）
-
-只返回 JSON，不要其他文字：
-{"action": "continue|switch", "label": "话题label或null", "reason": "简短原因"}`;
+const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息属于哪个话题。continue=当前话题，switch=切到另一个已有话题。不确定选continue。只返回JSON：{"action":"continue|switch","label":"话题label","reason":"原因"}`;
 
 async function classifyWithLLM(
   content: string,
@@ -163,7 +151,7 @@ async function classifyWithLLM(
   log: (...args: unknown[]) => void
 ): Promise<ClassifyResult | null> {
   const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
+  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
   const url = `${baseUrl}/chat/completions`;
 
   const topicSummary = allTopics.map(t => {
@@ -190,14 +178,14 @@ ${recentCtx}
       { role: 'system', content: CLASSIFY_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    max_tokens: 150,
+    max_tokens: 2000,
     temperature: 0.1,
   };
 
   log(`[classifier-llm] Calling LLM for classification...`);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
+  const timer = setTimeout(() => controller.abort(), 30000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
