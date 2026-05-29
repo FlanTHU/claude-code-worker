@@ -71,6 +71,7 @@ indent = '\t\t\t\t'
 routing_code = (
     f'{indent}if (beforeDispatchResult?.sessionKey && beforeDispatchResult.sessionKey !== acpDispatchSessionKey) {{\n'
     f'{indent}\tacpDispatchSessionKey = beforeDispatchResult.sessionKey;\n'
+    f'{indent}\tctx.SessionKey = acpDispatchSessionKey;\n'
     f'{indent}\tsessionStoreEntry = resolveSessionStoreLookup({{\n'
     f'{indent}\t\t...ctx,\n'
     f'{indent}\t\tSessionKey: acpDispatchSessionKey\n'
