@@ -284,13 +284,23 @@ export async function classify(
   const cmd = parseExplicitCommand(content);
   if (cmd) return cmd;
 
-  // No topics exist → passthrough. User must /new or /newtopic to create.
+  // No topics exist → auto-create first topic for substantial messages
   if (allTopics.length === 0) {
+    const trimmedContent = content.trim();
+    const isSubstantial = trimmedContent.length > 6;
+    if (isSubstantial) {
+      return {
+        action: 'new',
+        targetLabel: null,
+        confidence: 0.8,
+        reason: 'No existing topics, auto-creating first topic',
+      };
+    }
     return {
       action: 'passthrough',
       targetLabel: null,
       confidence: 0.9,
-      reason: 'No existing topics, passthrough to default session',
+      reason: 'No existing topics + short message, passthrough',
     };
   }
 
