@@ -3,49 +3,21 @@ import type { TopicRegistry } from './topic-registry.js';
 import { classify, generateTopicLabel } from './classifier.js';
 import { isTargetSession } from './utils.js';
 import { tryHandleCommand } from './commands.js';
-import type { LLMConfig } from './llm-client.js';
-import { execFile } from 'node:child_process';
+import { callLLM, type LLMConfig } from './llm-client.js';
+import { ConversationStore } from './conversation-store.js';
 
 const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
-const AGENT_TIMEOUT_MS = 120_000; // 2 minutes
-
-const CLI_PATH = '/root/.openclaw/workspace/bin/openclaw-cli.sh';
 
 const recentMessagesBySession = new Map<string, string[]>();
 
-function runAgentTurn(sessionId: string, message: string, log: (...args: unknown[]) => void): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const args = ['agent', '--session-id', sessionId, '--message', message, '--json'];
-    log(`[agent-call] ${CLI_PATH} ${args.join(' ').slice(0, 100)}...`);
+let conversationStore: ConversationStore | null = null;
 
-    execFile(CLI_PATH, args, {
-      timeout: AGENT_TIMEOUT_MS,
-      maxBuffer: 1024 * 1024,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        log(`[agent-call] Error: ${error.message}`);
-        log(`[agent-call] stderr: ${stderr?.slice(0, 200)}`);
-        reject(error);
-        return;
-      }
-
-      log(`[agent-call] stdout length=${stdout.length}`);
-
-      const cleanedStdout = stdout
-        .split('\n')
-        .filter(l => !l.startsWith('Debugger listening') && !l.startsWith('For help, see:') && !l.startsWith('Track SDK:'))
-        .join('\n')
-        .trim();
-      try {
-        const result = JSON.parse(cleanedStdout);
-        const text = result?.result?.payloads?.[0]?.text ?? result?.reply?.text ?? result?.text ?? result?.output ?? cleanedStdout;
-        resolve(typeof text === 'string' ? text : JSON.stringify(text));
-      } catch {
-        resolve(cleanedStdout || '(无回复)');
-      }
-    });
-  });
+function getConversationStore(stateDir: string): ConversationStore {
+  if (!conversationStore) {
+    conversationStore = new ConversationStore(stateDir);
+  }
+  return conversationStore;
 }
 
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
@@ -63,15 +35,12 @@ function resolveTopicFromQuote(
   const footerValue = match[1].trim();
   log(`[hook-handler] Found topic footer "${footerValue}" in quoted message`);
 
-  // Try direct label match first
   if (registry.get(footerValue)) return footerValue;
 
-  // Footer uses displayName — find topic by displayName
   const allTopics = registry.getAll();
   const byDisplayName = allTopics.find(t => t.displayName === footerValue);
   if (byDisplayName) return byDisplayName.label;
 
-  // Partial match (displayName may be truncated with …)
   const byPrefix = allTopics.find(t =>
     footerValue.endsWith('…') && t.displayName.startsWith(footerValue.slice(0, -1))
   );
@@ -96,14 +65,12 @@ async function deriveDisplayName(
   const fallback = deriveDisplayNameFallback(content);
 
   if (!llmConfig?.apiKey) {
-    log(`[hook-handler] deriveDisplayName: no apiKey, using fallback "${fallback}"`);
     return fallback;
   }
 
   const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
   const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-pro-mit';
   const url = `${baseUrl}/chat/completions`;
-  log(`[hook-handler] deriveDisplayName: calling ${model} at ${baseUrl}`);
 
   const body = {
     model,
@@ -134,16 +101,12 @@ async function deriveDisplayName(
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      log(`[hook-handler] Display name LLM HTTP ${response.status}`);
-      return fallback;
-    }
+    if (!response.ok) return fallback;
 
     const data = await response.json() as any;
     const msg = data?.choices?.[0]?.message;
-    const raw = (msg?.content ?? msg?.reasoning_content ?? '').trim();
+    const raw = (msg?.content || msg?.reasoning_content || '').trim();
 
-    // Extract last line as the actual answer (reasoning models may prefix with thinking)
     const lines = raw.split('\n').filter((l: string) => l.trim());
     const answer = lines[lines.length - 1]?.trim() ?? '';
 
@@ -151,10 +114,8 @@ async function deriveDisplayName(
       log(`[hook-handler] Generated display name: "${answer}"`);
       return answer;
     }
-    log(`[hook-handler] Display name LLM response not usable: "${raw.slice(0, 50)}"`);
     return fallback;
-  } catch (err: any) {
-    log(`[hook-handler] deriveDisplayName error: ${err?.message ?? err}`);
+  } catch {
     return fallback;
   } finally {
     clearTimeout(timer);
@@ -175,12 +136,10 @@ export async function handleBeforeDispatch(params: {
   const content: string = event.cleanedBody || event.content || event.body || '';
   const sessionKey: string = params.ctx?.sessionKey || event.sessionKey || '';
 
-  // Extract quoted/reply message content from event (field name varies by adapter)
   const quotedContent: string = event.quotedMessage || event.quotedContent
     || event.replyContent || event.quote || event.parentContent
     || event.replyText || event.quoteText || '';
 
-  // Log event keys on first call to discover field names
   if (!quotedContent && event._quotedLogged !== true) {
     const keys = Object.keys(event).filter(k => !['body', 'content', 'cleanedBody'].includes(k));
     log(`[hook-handler] Event keys (no quote found): ${keys.join(', ')}`);
@@ -199,19 +158,15 @@ export async function handleBeforeDispatch(params: {
 
   const trimmed = content.trim();
 
-  // Slash commands are handled by registerCommand, but also intercept here as fallback
   if (/^\/(topics|switch|newtopic|new|endall|end)\b/i.test(trimmed)) {
     const cmdResult = await tryHandleCommand(content, registry, config, log);
     if (cmdResult) return cmdResult;
     return undefined;
   }
 
-  // Detect topic from quoted message footer (📌 话题: xxx)
   const quotedTopicLabel = resolveTopicFromQuote(quotedContent, registry, log);
-
   const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
 
-  // If quoting a topic message, force-route to that topic
   let result;
   if (quotedTopicLabel) {
     result = {
@@ -235,7 +190,6 @@ export async function handleBeforeDispatch(params: {
     if (oldest) recentMessagesBySession.delete(oldest);
   }
 
-  // Determine topic label
   let topicLabel: string | null = null;
 
   switch (result.action) {
@@ -279,22 +233,41 @@ export async function handleBeforeDispatch(params: {
 
   if (!topicLabel) return undefined;
 
-  // ── Dispatch via OpenClaw agent CLI with topic-isolated session ──
-  const topicSessionId = `topic-${topicLabel}`;
+  // ── Call LLM with per-topic conversation history ──
+  const store = getConversationStore(params.stateDir);
+
+  store.appendMessage(topicLabel, {
+    role: 'user',
+    content,
+    timestamp: Date.now(),
+  });
+
+  const history = store.getMessages(topicLabel);
+
+  const llmConfig: LLMConfig = {
+    ...classifierLlmConfig,
+    systemPrompt: '你是一个有用的AI助手。请根据对话历史回答用户的问题。',
+  };
 
   try {
-    const reply = await runAgentTurn(topicSessionId, content, log);
+    const reply = await callLLM(history, llmConfig, log);
+
+    store.appendMessage(topicLabel, {
+      role: 'assistant',
+      content: reply,
+      timestamp: Date.now(),
+    });
 
     const topic = registry.get(topicLabel);
     const footer = config.replyFooter
       ? `\n\n---\n📌 话题: ${topic?.displayName ?? topicLabel}`
       : '';
 
-    log(`[hook-handler] Agent reply ${reply.length} chars for topic "${topicLabel}"`);
+    log(`[hook-handler] LLM reply ${reply.length} chars for topic "${topicLabel}"`);
 
     return { handled: true, text: reply + footer };
   } catch (err: any) {
-    log(`[hook-handler] Agent call failed: ${err?.message?.slice(0, 150)}`);
+    log(`[hook-handler] LLM call failed: ${err?.message?.slice(0, 150)}`);
     return undefined;
   }
 }

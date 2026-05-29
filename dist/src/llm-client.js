@@ -41,7 +41,8 @@ export async function callLLM(messages, config, log) {
             throw new Error(`LLM API ${response.status}: ${errText.slice(0, 200)}`);
         }
         const data = await response.json();
-        const content = data?.choices?.[0]?.message?.content ?? '';
+        const msg = data?.choices?.[0]?.message;
+        const content = msg?.content || msg?.reasoning_content || '';
         if (!content) {
             log('[llm] WARNING: empty response from LLM');
             return '(无回复)';

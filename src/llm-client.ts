@@ -64,7 +64,8 @@ export async function callLLM(
     }
 
     const data = await response.json() as any;
-    const content = data?.choices?.[0]?.message?.content ?? '';
+    const msg = data?.choices?.[0]?.message;
+    const content = msg?.content || msg?.reasoning_content || '';
 
     if (!content) {
       log('[llm] WARNING: empty response from LLM');
