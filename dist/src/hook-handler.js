@@ -254,20 +254,14 @@ export async function handleBeforeDispatch(params) {
             registry.setKeywords(topicLabel, keywords);
         }
     }).catch(() => { });
-    // ── Session routing: mutate ctx.sessionKey to topic session ──
+    // ── Session routing via before_dispatch sessionKey field ──
     const topic = registry.get(topicLabel);
     if (topic) {
         const newSessionKey = topic.sessionKey;
         log(`[hook-handler] Routing to topic session: ${sessionKey} → ${newSessionKey}`);
-        // Strategy 1: Mutate ctx.sessionKey (if gateway reads it before dispatch)
-        ctx.sessionKey = newSessionKey;
-        // Strategy 2: Also set on event in case gateway reads from there
-        event.sessionKey = newSessionKey;
-        // Strategy 3: Return routeToSession in result (if gateway supports it)
         return {
             handled: false,
-            routeToSession: newSessionKey,
-            topicLabel,
+            sessionKey: newSessionKey,
         };
     }
     return undefined;

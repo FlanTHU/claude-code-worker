@@ -55,6 +55,5 @@ export interface HookContext {
 export interface HookResult {
     handled: boolean;
     text?: string;
-    routeToSession?: string;
-    topicLabel?: string;
+    sessionKey?: string;
 }
