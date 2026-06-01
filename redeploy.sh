@@ -62,7 +62,7 @@ fi
 
 echo ""
 echo "=== Step 4: Restart gateway ==="
-pkill -9 -f "openclaw" 2>/dev/null || true
+pkill -9 -f "openclaw gateway" 2>/dev/null || true
 sleep 2
 : > /tmp/gw.log
 GW_SCRIPT="${GW_SCRIPT:-/root/.openclaw/sg.sh}"

@@ -146,7 +146,7 @@ bash "$PLUGIN_DIR/patch-gateway.sh"
 # ── Step 4: Restart gateway ──
 echo ""
 echo "[4/5] Restarting gateway..."
-pkill -9 -f "openclaw" 2>/dev/null || true
+pkill -9 -f "openclaw gateway" 2>/dev/null || true
 sleep 3
 
 # Write gateway startup script to persistent path + symlink to /tmp
@@ -244,7 +244,7 @@ else
     echo "Gateway patches missing, re-applying..."
     bash "$GIT_ROOT/patch-gateway.sh"
     # Restart gateway to pick up patches
-    pkill -9 -f "openclaw" 2>/dev/null || true
+    pkill -9 -f "openclaw gateway" 2>/dev/null || true
     sleep 2
     GW_SCRIPT="/root/.openclaw/sg.sh"
     if [ -f "$GW_SCRIPT" ]; then
