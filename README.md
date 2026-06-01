@@ -6,7 +6,7 @@ OpenClaw 话题路由插件 — 自动将私聊消息按话题分流到独立 se
 
 ```bash
 # 任意 OpenClaw 容器上执行（一行搞定）
-curl -fsSL https://raw.githubusercontent.com/FlanTHU/claude-code-worker/v2-direct-llm/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/FlanTHU/claude-code-worker/main/deploy.sh | bash
 ```
 
 手动部署：
@@ -14,8 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/FlanTHU/claude-code-worker/v2-direc
 ```bash
 git config --global http.sslVerify false
 REPO=/root/.openclaw/workspace/code-repo
-[ -d "$REPO/.git" ] && (cd "$REPO" && git pull origin v2-direct-llm) || \
-  (mkdir -p "$(dirname $REPO)" && git clone -b v2-direct-llm https://github.com/FlanTHU/claude-code-worker.git "$REPO")
+[ -d "$REPO/.git" ] && (cd "$REPO" && git pull origin main) || \
+  (mkdir -p "$(dirname $REPO)" && git clone -b main https://github.com/FlanTHU/claude-code-worker.git "$REPO")
 cd "$REPO" && FORCE_BOOTSTRAP=1 bash bootstrap.sh
 ```
 

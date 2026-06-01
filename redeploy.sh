@@ -5,7 +5,7 @@ set -e
 
 REPO_DIR="/root/.openclaw/workspace/code-repo/openclaw-topic-router"
 DST="/app/dist/extensions/topic-router/src"
-BRANCH="v2-direct-llm"
+BRANCH="main"
 
 cd "$REPO_DIR"
 

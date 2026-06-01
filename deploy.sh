@@ -3,10 +3,10 @@
 # Handles fresh containers, existing installs, network issues, missing tools.
 #
 # Usage (paste this single line into any container):
-#   curl -fsSL https://raw.githubusercontent.com/FlanTHU/claude-code-worker/v2-direct-llm/deploy.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/FlanTHU/claude-code-worker/main/deploy.sh | bash
 #
 # Or if curl is unavailable:
-#   wget -qO- https://raw.githubusercontent.com/FlanTHU/claude-code-worker/v2-direct-llm/deploy.sh | bash
+#   wget -qO- https://raw.githubusercontent.com/FlanTHU/claude-code-worker/main/deploy.sh | bash
 #
 # Or manually:
 #   bash deploy.sh
@@ -15,7 +15,7 @@ set -e
 
 REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
 REPO_DIR="/root/.openclaw/workspace/code-repo"
-BRANCH="v2-direct-llm"
+BRANCH="main"
 
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Topic Router — One-Click Deploy            ║"

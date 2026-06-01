@@ -6,7 +6,7 @@
 #     to restart. Use redeploy.sh for code-only updates without re-patching.
 #
 # Usage (fresh container):
-#   git clone -b v2-direct-llm https://github.com/FlanTHU/claude-code-worker.git /tmp/tr
+#   git clone -b main https://github.com/FlanTHU/claude-code-worker.git /tmp/tr
 #   bash /tmp/tr/bootstrap.sh
 #
 # Usage (existing container, force restart):
@@ -23,7 +23,7 @@ REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
 GIT_ROOT="/root/.openclaw/workspace/code-repo"
 PLUGIN_DIR="$GIT_ROOT"
 EXT_DIR="/app/dist/extensions/topic-router"
-BRANCH="v2-direct-llm"
+BRANCH="main"
 STATE_DIR="/root/.openclaw/topic-router-state"
 
 # Safety check: refuse to run if gateway is currently serving traffic
