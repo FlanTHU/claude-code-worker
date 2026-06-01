@@ -71,20 +71,44 @@ echo "[1/3] Getting code..."
 git config --global http.sslVerify false 2>/dev/null || true
 git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 
+TARBALL_URL="https://github.com/FlanTHU/claude-code-worker/archive/refs/heads/${BRANCH}.tar.gz"
+
+fetch_via_tarball() {
+  echo "  Trying tarball download..."
+  local tmp="/tmp/topic-router-$$.tar.gz"
+  if curl -fsSL --connect-timeout 10 -o "$tmp" "$TARBALL_URL" 2>/dev/null \
+     || wget -q --timeout=10 -O "$tmp" "$TARBALL_URL" 2>/dev/null; then
+    rm -rf "$REPO_DIR"
+    mkdir -p "$REPO_DIR"
+    tar xzf "$tmp" -C "$REPO_DIR" --strip-components=1
+    rm -f "$tmp"
+    echo "  ✓ Downloaded via tarball"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 if [ -d "$REPO_DIR/.git" ]; then
   cd "$REPO_DIR"
   echo "  Repo exists, updating..."
   if ! timeout 15 git fetch origin "$BRANCH" --force 2>/dev/null; then
-    warn "git fetch failed/timed out, using local code"
+    warn "git fetch failed/timed out"
+    if ! fetch_via_tarball; then
+      warn "Tarball also failed, using local code"
+    fi
   else
     git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
     git reset --hard "origin/$BRANCH" 2>/dev/null || true
   fi
 else
-  echo "  Fresh install, cloning..."
+  echo "  Fresh install..."
   mkdir -p "$(dirname "$REPO_DIR")"
-  if ! timeout 60 git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR" 2>&1; then
-    fail "git clone failed. Check network connectivity to github.com"
+  if ! timeout 30 git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR" 2>/dev/null; then
+    warn "git clone failed, trying tarball"
+    if ! fetch_via_tarball; then
+      fail "Cannot download code. Check network connectivity."
+    fi
   fi
   cd "$REPO_DIR"
 fi
