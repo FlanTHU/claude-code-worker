@@ -6,7 +6,7 @@
  *   L1: High-confidence rules (keyword 2+, continuation signals, short messages)
  *   L2: LLM fallback for ambiguous cases
  */
-import type { ClassifyResult, TopicEntry, TopicRouterConfig } from './types.js';
+import type { ClassifyResult, TopicEntry, TopicRouterConfig, AdaptiveThresholds, UIStrategy } from './types.js';
 import type { TopicRegistry } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
 export interface ClassifyOptions {
@@ -22,3 +22,4 @@ export declare function matchKeywords(content: string, topics: TopicEntry[]): Cl
 export declare function detectContinuation(content: string, _recentMessages: string[], activeTopic: TopicEntry | null): ClassifyResult | null;
 export declare function classify(content: string, recentMessages: string[], registry: TopicRegistry, config: TopicRouterConfig, llmConfig?: LLMConfig, log?: (...args: unknown[]) => void): Promise<ClassifyResult>;
 export declare function generateTopicLabel(content: string): string;
+export declare function determineUIStrategy(result: ClassifyResult, thresholds: AdaptiveThresholds): UIStrategy;

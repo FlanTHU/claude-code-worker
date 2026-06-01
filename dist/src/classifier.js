@@ -374,3 +374,15 @@ function simpleHash(str) {
     }
     return Math.abs(hash).toString(36).slice(0, 6);
 }
+// ---------------------------------------------------------------------------
+// V4: Confidence-based UI strategy
+// ---------------------------------------------------------------------------
+export function determineUIStrategy(result, thresholds) {
+    if (result.action === 'continue' || result.action === 'passthrough')
+        return 'silent';
+    if (result.confidence >= thresholds.hintThresholdHigh)
+        return 'silent';
+    if (result.confidence >= thresholds.hintThresholdLow)
+        return 'hint';
+    return 'confirm';
+}

@@ -15,6 +15,8 @@ export interface TopicEntry {
   messageCount: number;
   keywords: string[];
   summary?: string;
+  parentFork?: string;
+  forkExpiresAt?: number;
 }
 
 export interface TopicRegistryData {
@@ -28,6 +30,8 @@ export interface ClassifyResult {
   displayName?: string;
   confidence: number;
   reason: string;
+  uiStrategy?: UIStrategy;
+  layer?: string;
 }
 
 export interface TopicRouterConfig {
@@ -40,6 +44,7 @@ export interface TopicRouterConfig {
   pruneAfterHours: number;
   replyFooter: boolean;
   targetSessionKey: string;
+  v4?: V4Config;
 }
 
 export interface HookEvent {
@@ -64,4 +69,77 @@ export interface HookResult {
   handled: boolean;
   text?: string;
   sessionKey?: string;
+}
+
+// ── V4: Feedback & Self-Learning ──
+
+export type FeedbackSignal =
+  | 'manual_switch_after_auto'
+  | 'manual_new_after_continue'
+  | 'continued_in_routed_topic'
+  | 'immediate_switch_back';
+
+export interface FeedbackEvent {
+  timestamp: number;
+  signal: FeedbackSignal;
+  fromTopic: string | null;
+  toTopic: string | null;
+  classifierLayer: string;
+  confidence: number;
+  messageSnippet: string;
+}
+
+export interface AdaptiveThresholds {
+  confidenceThreshold: number;
+  saturationMessageCount: number;
+  saturationIdleMinutes: number;
+  hintThresholdLow: number;
+  hintThresholdHigh: number;
+  lastAdjustedAt: number;
+}
+
+export interface FeedbackStoreData {
+  events: FeedbackEvent[];
+  thresholds: AdaptiveThresholds;
+  stats: {
+    totalRoutes: number;
+    correctRoutes: number;
+    corrections: number;
+    missedNewTopics: number;
+  };
+}
+
+// ── V4: Soft Fork ──
+
+export interface ForkContext {
+  parentTopicLabel: string;
+  childTopicLabel: string;
+  forkedAt: number;
+  contextSummary: string;
+  mergeWindowExpiresAt: number;
+  merged: boolean;
+}
+
+export interface ContextBridgeData {
+  activeForks: ForkContext[];
+}
+
+// ── V4: Route Tracking ──
+
+export interface LastRouteInfo {
+  timestamp: number;
+  topic: string;
+  action: ClassifyAction;
+  confidence: number;
+  layer: string;
+}
+
+export type UIStrategy = 'silent' | 'hint' | 'confirm';
+
+// ── V4: Config Extension ──
+
+export interface V4Config {
+  softFork: { enabled: boolean; mergeWindowMinutes: number };
+  feedback: { enabled: boolean; adaptInterval: number };
+  hints: { enabled: boolean; lowThreshold: number; highThreshold: number };
 }

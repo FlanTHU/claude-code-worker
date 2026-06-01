@@ -46,7 +46,7 @@ const handleTopics = async ({ registry }) => {
 // ---------------------------------------------------------------------------
 // /switch — Switch to a specific topic
 // ---------------------------------------------------------------------------
-const handleSwitch = async ({ args, registry, log }) => {
+const handleSwitch = async ({ args, registry, log, feedbackStore, contextBridge }) => {
     const label = args.trim();
     if (!label) {
         const current = registry.getActive();
@@ -69,6 +69,47 @@ const handleSwitch = async ({ args, registry, log }) => {
             text: `⚠️ 未找到话题 "${label}"。使用 \`/topics\` 查看所有话题。`,
         };
     }
+    const currentTopic = registry.getActive();
+    // V4: Check for merge-back (soft fork)
+    if (contextBridge && currentTopic) {
+        const fork = contextBridge.checkMerge(currentTopic.label, label);
+        if (fork) {
+            contextBridge.markMerged(fork);
+            registry.markEnded(currentTopic.label);
+            registry.setActive(label);
+            log(`[v4-soft-fork] Merged back: ${currentTopic.label} → ${label}`);
+            if (feedbackStore) {
+                feedbackStore.record('immediate_switch_back', {
+                    fromTopic: currentTopic.label,
+                    toTopic: label,
+                    classifierLayer: 'command',
+                    confidence: 1.0,
+                    messageSnippet: `/switch ${label}`,
+                });
+            }
+            return {
+                handled: true,
+                text: `🔄 已合并回话题 **${topic.displayName}**（自动创建的「${currentTopic.displayName}」已结束）`,
+            };
+        }
+    }
+    // V4: Emit feedback if this is a correction of recent auto-route
+    if (feedbackStore) {
+        const lastRoute = feedbackStore.getLastRoute();
+        if (lastRoute && lastRoute.topic !== label) {
+            const elapsed = Date.now() - lastRoute.timestamp;
+            if (elapsed < 60_000) {
+                feedbackStore.record('manual_switch_after_auto', {
+                    fromTopic: lastRoute.topic,
+                    toTopic: label,
+                    classifierLayer: lastRoute.layer,
+                    confidence: lastRoute.confidence,
+                    messageSnippet: `/switch ${label}`,
+                });
+                log(`[v4-feedback] Correction detected: auto-routed to "${lastRoute.topic}", user switched to "${label}"`);
+            }
+        }
+    }
     registry.setActive(label);
     log(`[topic-router] Switched to topic: ${label}`);
     return {
@@ -79,10 +120,27 @@ const handleSwitch = async ({ args, registry, log }) => {
 // ---------------------------------------------------------------------------
 // /new — Create a new topic
 // ---------------------------------------------------------------------------
-const handleNew = async ({ args, registry, log }) => {
+const handleNew = async ({ args, registry, log, feedbackStore }) => {
     const label = args.trim() || `topic-${Date.now().toString(36)}`;
     const topic = registry.getOrCreate(label, label);
     topic.keywords = [];
+    // V4: Emit feedback if system should have auto-created
+    if (feedbackStore) {
+        const lastRoute = feedbackStore.getLastRoute();
+        if (lastRoute && lastRoute.action === 'continue') {
+            const elapsed = Date.now() - lastRoute.timestamp;
+            if (elapsed < 120_000) {
+                feedbackStore.record('manual_new_after_continue', {
+                    fromTopic: lastRoute.topic,
+                    toTopic: label,
+                    classifierLayer: lastRoute.layer,
+                    confidence: lastRoute.confidence,
+                    messageSnippet: `/new ${label}`,
+                });
+                log(`[v4-feedback] Missed new-topic: system continued "${lastRoute.topic}", user created "${label}"`);
+            }
+        }
+    }
     log(`[topic-router] Created new topic: ${label}`);
     return {
         handled: true,
@@ -151,7 +209,7 @@ const COMMANDS = {
 /**
  * Try to handle a slash command. Returns undefined if the message is not a command.
  */
-export async function tryHandleCommand(content, registry, config, log) {
+export async function tryHandleCommand(content, registry, config, log, feedbackStore, contextBridge) {
     const trimmed = content.trim();
     const match = trimmed.match(/^\/(\w+)\s*(.*)/s);
     if (!match)
@@ -161,7 +219,7 @@ export async function tryHandleCommand(content, registry, config, log) {
     const handler = COMMANDS[commandName];
     if (!handler)
         return undefined;
-    return handler({ args, registry, config, log });
+    return handler({ args, registry, config, log, feedbackStore, contextBridge });
 }
 // ---------------------------------------------------------------------------
 // Helpers

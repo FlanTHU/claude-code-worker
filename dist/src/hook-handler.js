@@ -1,4 +1,4 @@
-import { classify, generateTopicLabel } from './classifier.js';
+import { classify, generateTopicLabel, determineUIStrategy } from './classifier.js';
 import { isTargetSession } from './utils.js';
 import { tryHandleCommand } from './commands.js';
 const RECENT_MESSAGE_WINDOW = 5;
@@ -154,7 +154,7 @@ async function deriveDisplayName(content, llmConfig, log) {
  * - Footer added via separate output hook
  */
 export async function handleBeforeDispatch(params) {
-    const { event, ctx, registry, config, classifierLlmConfig, log } = params;
+    const { event, ctx, registry, config, classifierLlmConfig, log, feedbackStore, contextBridge } = params;
     const content = event.cleanedBody || event.content || event.body || '';
     const sessionKey = ctx?.sessionKey || event.sessionKey || '';
     const quotedContent = event.quotedMessage || event.quotedContent
@@ -175,7 +175,7 @@ export async function handleBeforeDispatch(params) {
     const trimmed = content.trim();
     // Commands are handled directly (they return text, no routing needed)
     if (/^\/(topics|switch|newtopic|new|endall|end)\b/i.test(trimmed)) {
-        const cmdResult = await tryHandleCommand(content, registry, config, log);
+        const cmdResult = await tryHandleCommand(content, registry, config, log, feedbackStore, contextBridge);
         if (cmdResult)
             return cmdResult;
         return undefined;
@@ -196,6 +196,45 @@ export async function handleBeforeDispatch(params) {
         result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
     }
     log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
+    // ── V4: UI Strategy ──
+    const thresholds = feedbackStore?.getThresholds();
+    if (thresholds && config.v4?.hints?.enabled) {
+        const uiStrategy = determineUIStrategy(result, thresholds);
+        result.uiStrategy = uiStrategy;
+        if (uiStrategy === 'confirm' && (result.action === 'new' || result.action === 'switch')) {
+            log(`[v4-hints] Low confidence (${result.confidence}), showing confirm hint instead of routing`);
+            const targetDesc = result.action === 'new' ? '新话题' : `话题「${result.targetLabel}」`;
+            return {
+                handled: true,
+                text: `🤔 这条消息可能属于${targetDesc}。\n→ /new 创建新话题 | 继续发消息留在当前话题`,
+            };
+        }
+    }
+    // ── V4: Track route for feedback detection ──
+    if (feedbackStore && config.v4?.feedback?.enabled && result.action !== 'passthrough') {
+        const lastRoute = {
+            timestamp: Date.now(),
+            topic: result.targetLabel ?? '',
+            action: result.action,
+            confidence: result.confidence,
+            layer: result.layer ?? result.reason.split(':')[0] ?? 'unknown',
+        };
+        feedbackStore.setLastRoute(lastRoute);
+        // Positive signal: user continued in previously routed topic
+        const prevRoute = feedbackStore.getLastRoute();
+        if (prevRoute && result.action === 'continue' && result.targetLabel === prevRoute.topic) {
+            const elapsed = Date.now() - prevRoute.timestamp;
+            if (elapsed < 300_000) {
+                feedbackStore.record('continued_in_routed_topic', {
+                    fromTopic: prevRoute.topic,
+                    toTopic: result.targetLabel,
+                    classifierLayer: prevRoute.layer,
+                    confidence: prevRoute.confidence,
+                    messageSnippet: content.slice(0, 50),
+                });
+            }
+        }
+    }
     const updated = [...recentMessages, content].slice(-RECENT_MESSAGE_WINDOW);
     recentMessagesBySession.set(sessionKey, updated);
     if (recentMessagesBySession.size > MAX_TRACKED_SESSIONS) {
@@ -230,9 +269,22 @@ export async function handleBeforeDispatch(params) {
             const label = result.targetLabel ?? generateTopicLabel(content);
             const fallbackName = deriveDisplayNameFallback(content);
             topicLabel = label;
+            // V4: Soft Fork — carry context from parent topic
+            const activeTopic = registry.getActive();
+            if (contextBridge && config.v4?.softFork?.enabled && activeTopic) {
+                try {
+                    const mergeMinutes = config.v4.softFork.mergeWindowMinutes ?? 5;
+                    const recentMsgs = recentMessagesBySession.get(sessionKey) ?? [];
+                    const summary = recentMsgs.slice(-5).join(' | ').slice(0, 200);
+                    contextBridge.createFork(activeTopic.label, label, summary, mergeMinutes);
+                    log(`[v4-soft-fork] Created fork: ${activeTopic.label} → ${label} (merge window ${mergeMinutes}min)`);
+                }
+                catch (err) {
+                    log(`[v4-soft-fork] Failed to create fork:`, err);
+                }
+            }
             registry.getOrCreate(label, fallbackName);
             registry.setActive(label);
-            // Derive better display name async (fire-and-forget, ~20s for mimo)
             deriveDisplayName(content, classifierLlmConfig, log).then(name => {
                 if (name !== fallbackName) {
                     registry.updateDisplayName(label, name);

@@ -1,5 +1,7 @@
 import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch } from './src/hook-handler.js';
+import { FeedbackStore } from './src/feedback-store.js';
+import { ContextBridge } from './src/context-bridge.js';
 function definePluginEntry(opts) { return opts; }
 const DEFAULT_CONFIG = {
     enabled: true,
@@ -11,6 +13,11 @@ const DEFAULT_CONFIG = {
     pruneAfterHours: 168,
     replyFooter: true,
     targetSessionKey: 'agent:main:main',
+    v4: {
+        softFork: { enabled: true, mergeWindowMinutes: 5 },
+        feedback: { enabled: true, adaptInterval: 20 },
+        hints: { enabled: true, lowThreshold: 0.5, highThreshold: 0.75 },
+    },
 };
 const DEFAULT_LLM_CONFIG = {
     baseUrl: 'http://model.mify.ai.srv/v1',
@@ -32,9 +39,16 @@ export default definePluginEntry({
         }
         const stateDir = resolveStateDir(api);
         const registry = new TopicRegistry(stateDir);
+        const feedbackStore = new FeedbackStore(stateDir);
+        const contextBridge = new ContextBridge(stateDir);
         const prunedCount = registry.prune(pluginConfig.pruneAfterHours * 3600 * 1000);
         if (prunedCount > 0) {
             log.info(`Pruned ${prunedCount} stale topic(s)`);
+        }
+        const fbStats = feedbackStore.getStats();
+        if (fbStats.totalRoutes > 0) {
+            const correctRate = Math.round((fbStats.correctRoutes / fbStats.totalRoutes) * 100);
+            log.info(`[v4] Feedback stats: ${fbStats.totalRoutes} routes, ${correctRate}% correct, ${fbStats.corrections} corrections`);
         }
         // ── Register slash commands via registerCommand (bypasses LLM) ──
         const cmdLog = (...args) => log.info('[cmd]', ...args);
@@ -130,6 +144,8 @@ export default definePluginEntry({
                     stateDir,
                     classifierLlmConfig,
                     log: (...args) => log.info(...args),
+                    feedbackStore,
+                    contextBridge,
                 });
                 return result;
             }

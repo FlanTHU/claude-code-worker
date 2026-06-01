@@ -7,7 +7,7 @@
  *   L2: LLM fallback for ambiguous cases
  */
 
-import type { ClassifyResult, TopicEntry, TopicRouterConfig } from './types.js';
+import type { ClassifyResult, TopicEntry, TopicRouterConfig, AdaptiveThresholds, UIStrategy } from './types.js';
 import type { TopicRegistry } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
 
@@ -467,4 +467,18 @@ function simpleHash(str: string): string {
     hash |= 0;
   }
   return Math.abs(hash).toString(36).slice(0, 6);
+}
+
+// ---------------------------------------------------------------------------
+// V4: Confidence-based UI strategy
+// ---------------------------------------------------------------------------
+
+export function determineUIStrategy(
+  result: ClassifyResult,
+  thresholds: AdaptiveThresholds
+): UIStrategy {
+  if (result.action === 'continue' || result.action === 'passthrough') return 'silent';
+  if (result.confidence >= thresholds.hintThresholdHigh) return 'silent';
+  if (result.confidence >= thresholds.hintThresholdLow) return 'hint';
+  return 'confirm';
 }
