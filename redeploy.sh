@@ -32,6 +32,8 @@ git show HEAD:dist/src/llm-client.js > "$DST/llm-client.js"
 git show HEAD:dist/src/utils.js > "$DST/utils.js"
 git show HEAD:dist/src/types.js > "$DST/types.js" 2>/dev/null || true
 git show HEAD:dist/src/conversation-store.js > "$DST/conversation-store.js" 2>/dev/null || true
+git show HEAD:dist/src/feedback-store.js > "$DST/feedback-store.js" 2>/dev/null || true
+git show HEAD:dist/src/context-bridge.js > "$DST/context-bridge.js" 2>/dev/null || true
 git show HEAD:dist/index.js > /app/dist/extensions/topic-router/index.js
 echo "Files copied."
 
@@ -49,7 +51,9 @@ check() {
 check "classifier — zero-overlap rule" "KEYWORD_MATURITY" "$DST/classifier.js"
 check "commands — /new resets keywords" 'keywords = \[\]' "$DST/commands.js"
 check "index — mimo-v2.5-mit model" "mimo-v2.5-mit" "/app/dist/extensions/topic-router/index.js"
-check "hook-handler — session routing" "routeToSession" "$DST/hook-handler.js"
+check "hook-handler — session routing" "sessionKey" "$DST/hook-handler.js"
+check "v4 — feedback-store" "adaptThresholds" "$DST/feedback-store.js"
+check "v4 — context-bridge" "checkMerge" "$DST/context-bridge.js"
 
 if [ "$PASS" = false ]; then
   echo ""
