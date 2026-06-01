@@ -7,10 +7,10 @@
 #
 # Usage (fresh container):
 #   git clone -b v2-direct-llm https://github.com/FlanTHU/claude-code-worker.git /tmp/tr
-#   bash /tmp/tr/openclaw-topic-router/bootstrap.sh
+#   bash /tmp/tr/bootstrap.sh
 #
 # Usage (existing container, force restart):
-#   FORCE_BOOTSTRAP=1 bash bootstrap.sh
+#   FORCE_BOOTSTRAP=1 bash /root/.openclaw/workspace/code-repo/bootstrap.sh
 #
 # Prerequisites:
 #   - OpenClaw gateway installed at /app/dist/
@@ -20,7 +20,9 @@
 set -e
 
 REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
-REPO_DIR="/root/.openclaw/workspace/code-repo/openclaw-topic-router"
+GIT_ROOT="/root/.openclaw/workspace/code-repo"
+PLUGIN_SUBDIR="openclaw-topic-router"
+PLUGIN_DIR="$GIT_ROOT/$PLUGIN_SUBDIR"
 EXT_DIR="/app/dist/extensions/topic-router"
 BRANCH="v2-direct-llm"
 STATE_DIR="/tmp/topic-router-state"
@@ -43,19 +45,24 @@ echo ""
 
 # ── Step 1: Clone or update repo ──
 echo "[1/5] Fetching code..."
-git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
+git config --global --add safe.directory "$GIT_ROOT" 2>/dev/null || true
 
-if [ -d "$REPO_DIR/.git" ]; then
-  cd "$REPO_DIR"
+if [ -d "$GIT_ROOT/.git" ]; then
+  cd "$GIT_ROOT"
   git fetch origin "$BRANCH" --force
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
   git reset --hard "origin/$BRANCH"
 else
-  mkdir -p "$(dirname "$REPO_DIR")"
-  git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
-  cd "$REPO_DIR"
+  mkdir -p "$(dirname "$GIT_ROOT")"
+  git clone -b "$BRANCH" "$REPO_URL" "$GIT_ROOT"
+  cd "$GIT_ROOT"
 fi
 echo "  HEAD: $(git log --oneline -1)"
+
+if [ ! -d "$PLUGIN_DIR/dist" ]; then
+  echo "  ERROR: $PLUGIN_DIR/dist not found"
+  exit 1
+fi
 
 # ── Step 2: Install extension ──
 echo ""
@@ -68,8 +75,8 @@ rm -rf "$EXT_DIR"
 
 # Create extension structure
 mkdir -p "$EXT_DIR/src"
-cp "$REPO_DIR/dist/index.js" "$EXT_DIR/"
-cp "$REPO_DIR/dist/src/"*.js "$EXT_DIR/src/"
+cp "$PLUGIN_DIR/dist/index.js" "$EXT_DIR/"
+cp "$PLUGIN_DIR/dist/src/"*.js "$EXT_DIR/src/"
 
 cat > "$EXT_DIR/package.json" << 'EOF'
 {"name":"topic-router","type":"module","version":"0.1.0"}
@@ -126,7 +133,7 @@ echo "  Extension installed at $EXT_DIR"
 # ── Step 3: Patch gateway for sessionKey routing ──
 echo ""
 echo "[3/5] Patching gateway..."
-bash "$REPO_DIR/patch-gateway.sh"
+bash "$PLUGIN_DIR/patch-gateway.sh"
 
 # ── Step 4: Restart gateway ──
 echo ""
@@ -200,9 +207,10 @@ cat > "$AUTOSTART" << 'AEOF'
 #!/bin/bash
 sleep 5
 EXT_DIR="/app/dist/extensions/topic-router"
-REPO_DIR="/root/.openclaw/workspace/code-repo/openclaw-topic-router"
-if [ ! -f "$EXT_DIR/index.js" ] && [ -d "$REPO_DIR" ]; then
-  bash "$REPO_DIR/bootstrap.sh"
+GIT_ROOT="/root/.openclaw/workspace/code-repo"
+BOOTSTRAP="$GIT_ROOT/bootstrap.sh"
+if [ ! -f "$EXT_DIR/index.js" ] && [ -f "$BOOTSTRAP" ]; then
+  FORCE_BOOTSTRAP=1 bash "$BOOTSTRAP"
 fi
 AEOF
 chmod +x "$AUTOSTART"
