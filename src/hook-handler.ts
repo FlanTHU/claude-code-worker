@@ -231,12 +231,18 @@ export async function handleBeforeDispatch(params: {
 
   const quotedContent: string = event.quotedMessage || event.quotedContent
     || event.replyContent || event.quote || event.parentContent
-    || event.replyText || event.quoteText || '';
+    || event.replyText || event.quoteText
+    || event.reply?.content || event.reply?.text || event.reply?.body
+    || '';
 
-  if (!quotedContent && event._quotedLogged !== true) {
-    const keys = Object.keys(event).filter(k => !['body', 'content', 'cleanedBody'].includes(k));
-    log(`[hook-handler] Event keys (no quote found): ${keys.join(', ')}`);
-    event._quotedLogged = true;
+  if (!quotedContent) {
+    const allKeys = Object.keys(event);
+    const replyLike = allKeys.filter(k =>
+      /quote|reply|parent|ref|thread|origin/i.test(k)
+    );
+    if (replyLike.length > 0) {
+      log(`[hook-handler] Potential quote fields found but empty: ${replyLike.map(k => `${k}=${JSON.stringify(event[k])?.slice(0, 100)}`).join(', ')}`);
+    }
   }
 
   log(`[hook-handler] content="${content.slice(0, 50)}" sessionKey="${sessionKey}" hasQuote=${!!quotedContent}`);
@@ -264,13 +270,15 @@ export async function handleBeforeDispatch(params: {
 
   let result;
   if (quotedTopicLabel) {
+    const activeTopic = registry.getActive();
+    const isSwitching = activeTopic && activeTopic.label !== quotedTopicLabel;
     result = {
-      action: 'continue' as const,
+      action: (isSwitching ? 'switch' : 'continue') as 'switch' | 'continue',
       targetLabel: quotedTopicLabel,
       confidence: 0.95,
       reason: `Quoted message belongs to topic "${quotedTopicLabel}"`,
     };
-    log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}"`);
+    log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}" (action=${result.action})`);
   } else {
     result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
   }
