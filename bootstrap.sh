@@ -24,7 +24,7 @@ GIT_ROOT="/root/.openclaw/workspace/code-repo"
 PLUGIN_DIR="$GIT_ROOT"
 EXT_DIR="/app/dist/extensions/topic-router"
 BRANCH="v2-direct-llm"
-STATE_DIR="/tmp/topic-router-state"
+STATE_DIR="/root/.openclaw/topic-router-state"
 
 # Safety check: refuse to run if gateway is currently serving traffic
 if [ "${FORCE_BOOTSTRAP:-}" != "1" ]; then
@@ -124,9 +124,14 @@ print('  Registered in openclaw.json')
 "
 fi
 
-# Create state directory
+# Create state directory (persistent across restarts)
 mkdir -p "$STATE_DIR"
 chmod 777 "$STATE_DIR"
+# Migrate old state from /tmp if exists
+if [ -d "/tmp/topic-router-state" ] && [ ! -d "/tmp/topic-router-state/.migrated" ]; then
+  cp -n /tmp/topic-router-state/*.json "$STATE_DIR/" 2>/dev/null || true
+  touch /tmp/topic-router-state/.migrated
+fi
 echo "  Extension installed at $EXT_DIR"
 
 # ── Step 3: Patch gateway for sessionKey routing ──
@@ -140,20 +145,20 @@ echo "[4/5] Restarting gateway..."
 pkill -9 -f "openclaw" 2>/dev/null || true
 sleep 3
 
-# Ensure startup script exists
-if [ ! -f /tmp/sg.sh ]; then
-  cat > /tmp/sg.sh << 'GWEOF'
+# Write gateway startup script to persistent path + symlink to /tmp
+GW_SCRIPT="/root/.openclaw/sg.sh"
+cat > "$GW_SCRIPT" << 'GWEOF'
 #!/bin/bash
 export HOME=/root
 export SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts
 export XDG_DATA_HOME=/root/.openclaw/xdg-data
 exec openclaw gateway --port 18789 --verbose
 GWEOF
-  chmod +x /tmp/sg.sh
-fi
+chmod +x "$GW_SCRIPT"
+ln -sf "$GW_SCRIPT" /tmp/sg.sh
 
 : > /tmp/gw.log
-runuser -u node -- /tmp/sg.sh &>/tmp/gw.log &
+runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
 disown
 
 echo "  Waiting for gateway..."
@@ -200,18 +205,54 @@ else
   exit 1
 fi
 
-# ── Bonus: Add @reboot auto-recovery ──
-AUTOSTART="/root/.openclaw/auto-topic-router.sh"
-cat > "$AUTOSTART" << 'AEOF'
+# ── Bonus: Install on-boot auto-recovery ──
+ON_BOOT="/root/.openclaw/on-boot.sh"
+cat > "$ON_BOOT" << 'AEOF'
 #!/bin/bash
-sleep 5
-EXT_DIR="/app/dist/extensions/topic-router"
+# Auto-recovery for topic-router after container restart.
+# Called by: container entrypoint, crontab @reboot, or manual invocation.
+LOG="/root/.openclaw/topic-router-boot.log"
+exec >> "$LOG" 2>&1
+echo ""
+echo "=== on-boot.sh triggered at $(date) ==="
+
 GIT_ROOT="/root/.openclaw/workspace/code-repo"
-BOOTSTRAP="$GIT_ROOT/bootstrap.sh"
-if [ ! -f "$EXT_DIR/index.js" ] && [ -f "$BOOTSTRAP" ]; then
-  FORCE_BOOTSTRAP=1 bash "$BOOTSTRAP"
+EXT_DIR="/app/dist/extensions/topic-router"
+
+# Wait for filesystem to be ready
+sleep 3
+
+# If extension is missing from /app/dist/, re-deploy
+if [ ! -f "$EXT_DIR/index.js" ]; then
+  echo "Extension missing, running bootstrap..."
+  if [ -f "$GIT_ROOT/bootstrap.sh" ]; then
+    FORCE_BOOTSTRAP=1 bash "$GIT_ROOT/bootstrap.sh"
+  else
+    echo "ERROR: bootstrap.sh not found at $GIT_ROOT"
+  fi
+else
+  # Extension exists but patches might be gone (new gateway binary)
+  if ! grep -q "session re-routed" /app/dist/dispatch-*.js 2>/dev/null; then
+    echo "Gateway patches missing, re-applying..."
+    bash "$GIT_ROOT/patch-gateway.sh"
+    # Restart gateway to pick up patches
+    pkill -9 -f "openclaw" 2>/dev/null || true
+    sleep 2
+    GW_SCRIPT="/root/.openclaw/sg.sh"
+    if [ -f "$GW_SCRIPT" ]; then
+      : > /tmp/gw.log
+      runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
+      disown
+      echo "Gateway restarted with patches"
+    fi
+  else
+    echo "Everything intact, no action needed"
+  fi
 fi
+echo "=== on-boot.sh done ==="
 AEOF
-chmod +x "$AUTOSTART"
-(crontab -l 2>/dev/null | grep -v "auto-topic-router"; echo "@reboot $AUTOSTART >> /tmp/topic-router-boot.log 2>&1") | crontab -
-echo "  (Added @reboot auto-recovery)"
+chmod +x "$ON_BOOT"
+
+# Register in crontab (best-effort, cron may not run in all containers)
+(crontab -l 2>/dev/null | grep -v "on-boot.sh"; echo "@reboot /root/.openclaw/on-boot.sh") | crontab - 2>/dev/null || true
+echo "  (Installed /root/.openclaw/on-boot.sh for auto-recovery)"

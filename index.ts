@@ -240,7 +240,7 @@ export default definePluginEntry({
 
 
 function resolveStateDir(_api: any): string {
-  return '/tmp/topic-router-state';
+  return process.env.TOPIC_ROUTER_STATE_DIR || '/root/.openclaw/topic-router-state';
 }
 
 function formatTimeAgo(timestamp: number): string {

@@ -61,7 +61,9 @@ echo "=== Step 4: Restart gateway ==="
 pkill -9 -f "openclaw" 2>/dev/null || true
 sleep 2
 : > /tmp/gw.log
-runuser -u node -- /tmp/sg.sh &>/tmp/gw.log &
+GW_SCRIPT="${GW_SCRIPT:-/root/.openclaw/sg.sh}"
+[ -f "$GW_SCRIPT" ] || GW_SCRIPT="/tmp/sg.sh"
+runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
 disown
 
 echo "Waiting for gateway..."
