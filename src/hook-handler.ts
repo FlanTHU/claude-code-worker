@@ -67,7 +67,7 @@ async function extractKeywords(
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), 8000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -146,7 +146,7 @@ async function deriveDisplayName(
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), 8000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };

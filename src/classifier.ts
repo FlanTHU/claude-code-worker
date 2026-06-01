@@ -137,8 +137,34 @@ export function detectContinuation(
 }
 
 // ---------------------------------------------------------------------------
-// LLM-based classification
+// LLM-based classification (with circuit breaker)
 // ---------------------------------------------------------------------------
+
+let llmFailCount = 0;
+let llmCircuitOpenUntil = 0;
+const LLM_CIRCUIT_THRESHOLD = 3;
+const LLM_CIRCUIT_COOLDOWN = 60_000;
+
+export function isLLMCircuitOpen(): boolean {
+  if (Date.now() < llmCircuitOpenUntil) return true;
+  if (llmCircuitOpenUntil > 0 && Date.now() >= llmCircuitOpenUntil) {
+    llmFailCount = 0;
+    llmCircuitOpenUntil = 0;
+  }
+  return false;
+}
+
+function recordLLMFailure(): void {
+  llmFailCount++;
+  if (llmFailCount >= LLM_CIRCUIT_THRESHOLD) {
+    llmCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
+  }
+}
+
+function recordLLMSuccess(): void {
+  llmFailCount = 0;
+  llmCircuitOpenUntil = 0;
+}
 
 const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 
@@ -185,7 +211,7 @@ ${recentCtx}
   log(`[classifier-llm] Calling LLM for classification...`);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), 8000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -202,6 +228,7 @@ ${recentCtx}
 
     if (!response.ok) {
       log(`[classifier-llm] HTTP ${response.status}, falling back to rules`);
+      recordLLMFailure();
       return null;
     }
 
@@ -211,11 +238,11 @@ ${recentCtx}
     log(`[classifier-llm] Raw response: ${raw.slice(0, 200)}`);
 
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) { recordLLMFailure(); return null; }
 
     const parsed = JSON.parse(jsonMatch[0]);
     const action = parsed.action as ClassifyResult['action'];
-    if (!['continue', 'switch', 'new'].includes(action)) return null;
+    if (!['continue', 'switch', 'new'].includes(action)) { recordLLMFailure(); return null; }
 
     let targetLabel: string | null = parsed.label || null;
 
@@ -246,6 +273,7 @@ ${recentCtx}
       targetLabel = activeTopic?.label ?? null;
     }
 
+    recordLLMSuccess();
     return {
       action,
       targetLabel,
@@ -254,6 +282,7 @@ ${recentCtx}
     };
   } catch (err: any) {
     log(`[classifier-llm] Error: ${err?.message}, falling back to rules`);
+    recordLLMFailure();
     return null;
   } finally {
     clearTimeout(timer);
@@ -358,14 +387,18 @@ export async function classify(
     }
   }
 
-  // L2: LLM fallback for ambiguous cases
+  // L2: LLM fallback for ambiguous cases (with circuit breaker)
   const useHybrid = config.classifier.mode === 'hybrid' || config.classifier.mode === 'llm';
 
   if (useHybrid && llmConfig?.apiKey) {
-    const llmResult = await classifyWithLLM(
-      content, activeTopic, allTopics, recentMessages, llmConfig, _log
-    );
-    if (llmResult) return llmResult;
+    if (isLLMCircuitOpen()) {
+      _log(`[classifier-llm] Circuit open, skipping LLM (cooldown 60s)`);
+    } else {
+      const llmResult = await classifyWithLLM(
+        content, activeTopic, allTopics, recentMessages, llmConfig, _log
+      );
+      if (llmResult) return llmResult;
+    }
   }
 
   // L3: Fallback rules (if LLM unavailable or failed)
