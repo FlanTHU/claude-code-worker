@@ -453,12 +453,24 @@ export async function classify(
 
   if (keywordResult) return keywordResult;
 
-  // No active topic, no keyword match → passthrough to default session
+  // No active topic — check if message is substantial enough to create new topic
+  const trimmedFinal = content.trim();
+  const isFinalSubstantial = trimmedFinal.length > 6;
+  if (isFinalSubstantial) {
+    return {
+      action: 'new',
+      targetLabel: null,
+      confidence: 0.7,
+      reason: 'No active topic + substantial message → auto-create new topic',
+    };
+  }
+
+  // No active topic, short message → passthrough
   return {
     action: 'passthrough',
     targetLabel: null,
     confidence: 0.7,
-    reason: 'No active topic, no keyword match → passthrough',
+    reason: 'No active topic + short message → passthrough',
   };
 }
 
