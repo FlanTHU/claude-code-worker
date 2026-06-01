@@ -181,7 +181,7 @@ echo "[5/5] Verification..."
 PASS=true
 
 verify() {
-  if $2; then
+  if eval "$2"; then
     echo "  ✓ $1"
   else
     echo "  ✗ $1"
@@ -189,11 +189,11 @@ verify() {
   fi
 }
 
-verify "Gateway running" "pgrep -f openclaw > /dev/null"
-verify "Plugin loaded" "grep -q 'topic-router' /tmp/gw.log"
-verify "Gateway patch (dispatch)" "grep -q 'session re-routed' /app/dist/dispatch-*.js 2>/dev/null"
-verify "Gateway patch (hook-runner)" "grep -q 'before_dispatch.*sessionKey' /app/dist/hook-runner-global-*.js 2>/dev/null"
-verify "Extension manifest" "[ -f '$EXT_DIR/openclaw.plugin.json' ]"
+verify "Gateway running" "pgrep -f openclaw >/dev/null 2>&1"
+verify "Plugin loaded" "grep -q topic-router /tmp/gw.log"
+verify "Gateway patch (dispatch)" "grep -ql 'session re-routed' /app/dist/dispatch-*.js 2>/dev/null"
+verify "Gateway patch (hook-runner)" "grep -ql 'before_dispatch.*sessionKey' /app/dist/hook-runner-global-*.js 2>/dev/null"
+verify "Extension manifest" "test -f $EXT_DIR/openclaw.plugin.json"
 
 echo ""
 if [ "$PASS" = true ]; then
