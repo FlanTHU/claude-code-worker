@@ -21,8 +21,7 @@ set -e
 
 REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
 GIT_ROOT="/root/.openclaw/workspace/code-repo"
-PLUGIN_SUBDIR="openclaw-topic-router"
-PLUGIN_DIR="$GIT_ROOT/$PLUGIN_SUBDIR"
+PLUGIN_DIR="$GIT_ROOT"
 EXT_DIR="/app/dist/extensions/topic-router"
 BRANCH="v2-direct-llm"
 STATE_DIR="/tmp/topic-router-state"
