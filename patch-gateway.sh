@@ -7,9 +7,10 @@ echo "=== Gateway Session Routing Patch ==="
 echo ""
 
 # --- Patch 1: dispatch file (const→let + routing code) ---
-DISPATCH_FILE=$(ls /app/dist/dispatch-[A-Za-z0-9_-]*.js 2>/dev/null | grep -v "acp\|result" | head -1)
+# Find the file containing actual dispatch logic (not a re-export stub)
+DISPATCH_FILE=$(grep -l "acpDispatchSessionKey\|before_dispatch_handled" /app/dist/dispatch-[A-Za-z0-9_-]*.js 2>/dev/null | head -1)
 if [ -z "$DISPATCH_FILE" ]; then
-  echo "ERROR: Cannot find dispatch file"
+  echo "ERROR: Cannot find dispatch file with session key logic"
   exit 1
 fi
 
@@ -93,9 +94,10 @@ print('  ✓ Dispatch patched')
 fi
 
 # --- Patch 2: hook-runner (allow sessionKey passthrough when handled=false) ---
-HOOK_FILE=$(ls /app/dist/hook-runner-global-*.js 2>/dev/null | head -1)
+# Find the file that actually contains the hook logic (not a re-export stub)
+HOOK_FILE=$(grep -l "handlerResult?.handled" /app/dist/hook-runner-global-*.js 2>/dev/null | head -1)
 if [ -z "$HOOK_FILE" ]; then
-  echo "ERROR: Cannot find hook-runner-global file"
+  echo "ERROR: Cannot find hook-runner-global file with handlerResult logic"
   exit 1
 fi
 
