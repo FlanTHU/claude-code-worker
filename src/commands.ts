@@ -5,10 +5,38 @@
  * and provide the user interface for topic management.
  */
 
-import type { TopicRouterConfig, HookResult } from './types.js';
+import type { TopicRouterConfig, TopicEntry, HookResult } from './types.js';
 import type { TopicRegistry } from './topic-registry.js';
 import type { FeedbackStore } from './feedback-store.js';
 import type { ContextBridge } from './context-bridge.js';
+
+function findSimilarTopics(query: string, topics: TopicEntry[], maxResults: number): TopicEntry[] {
+  if (topics.length === 0) return [];
+  const q = query.toLowerCase();
+
+  const scored = topics.map(t => {
+    const label = t.label.toLowerCase();
+    const name = t.displayName.toLowerCase();
+    let score = 0;
+    if (label.includes(q) || q.includes(label)) score += 3;
+    if (name.includes(q) || q.includes(name)) score += 3;
+    for (const kw of t.keywords) {
+      if (q.includes(kw.toLowerCase())) score += 1;
+    }
+    // Character overlap for fuzzy matching
+    const chars = new Set(q);
+    for (const c of name) {
+      if (chars.has(c)) score += 0.1;
+    }
+    return { topic: t, score };
+  });
+
+  return scored
+    .filter(s => s.score > 0.5)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults)
+    .map(s => s.topic);
+}
 
 type CommandHandler = (params: {
   args: string;
@@ -93,6 +121,15 @@ const handleSwitch: CommandHandler = async ({ args, registry, log, feedbackStore
 
   const topic = registry.get(label) ?? registry.findByDisplayName(label);
   if (!topic) {
+    const allTopics = registry.getAll();
+    const suggestions = findSimilarTopics(label, allTopics, 3);
+    if (suggestions.length > 0) {
+      const lines = [`⚠️ 未找到话题 "${label}"，你是否想切换到：\n`];
+      for (const s of suggestions) {
+        lines.push(`  • \`/switch ${s.label}\` — ${s.displayName}`);
+      }
+      return { handled: true, text: lines.join('\n') };
+    }
     return {
       handled: true,
       text: `⚠️ 未找到话题 "${label}"。使用 \`/topics\` 查看所有话题。`,

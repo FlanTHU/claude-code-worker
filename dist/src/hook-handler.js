@@ -4,6 +4,20 @@ import { tryHandleCommand } from './commands.js';
 const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
 const recentMessagesBySession = new Map();
+const recentAutoNewBySession = new Map();
+export function getRecentAutoNew(sessionKey) {
+    const entry = recentAutoNewBySession.get(sessionKey);
+    if (!entry)
+        return null;
+    if (Date.now() - entry.createdAt > 5 * 60 * 1000) {
+        recentAutoNewBySession.delete(sessionKey);
+        return null;
+    }
+    return entry;
+}
+export function clearRecentAutoNew(sessionKey) {
+    recentAutoNewBySession.delete(sessionKey);
+}
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
 function resolveTopicFromQuote(quotedContent, registry, log) {
     if (!quotedContent)
@@ -283,6 +297,16 @@ export async function handleBeforeDispatch(params) {
                 catch (err) {
                     log(`[v4-soft-fork] Failed to create fork:`, err);
                 }
+            }
+            // Track for "switch back" hint in output footer
+            if (activeTopic) {
+                const newSessionKey = `agent:main:topic:${label}`;
+                recentAutoNewBySession.set(newSessionKey, {
+                    newLabel: label,
+                    previousLabel: activeTopic.label,
+                    previousDisplayName: activeTopic.displayName,
+                    createdAt: Date.now(),
+                });
             }
             registry.getOrCreate(label, fallbackName);
             registry.setActive(label);

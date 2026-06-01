@@ -12,6 +12,29 @@ const MAX_TRACKED_SESSIONS = 50;
 
 const recentMessagesBySession = new Map<string, string[]>();
 
+// Track recently auto-created topics for "switch back" hints
+export interface RecentAutoNew {
+  newLabel: string;
+  previousLabel: string;
+  previousDisplayName: string;
+  createdAt: number;
+}
+const recentAutoNewBySession = new Map<string, RecentAutoNew>();
+
+export function getRecentAutoNew(sessionKey: string): RecentAutoNew | null {
+  const entry = recentAutoNewBySession.get(sessionKey);
+  if (!entry) return null;
+  if (Date.now() - entry.createdAt > 5 * 60 * 1000) {
+    recentAutoNewBySession.delete(sessionKey);
+    return null;
+  }
+  return entry;
+}
+
+export function clearRecentAutoNew(sessionKey: string): void {
+  recentAutoNewBySession.delete(sessionKey);
+}
+
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
 
 function resolveTopicFromQuote(
@@ -347,6 +370,17 @@ export async function handleBeforeDispatch(params: {
         } catch (err) {
           log(`[v4-soft-fork] Failed to create fork:`, err);
         }
+      }
+
+      // Track for "switch back" hint in output footer
+      if (activeTopic) {
+        const newSessionKey = `agent:main:topic:${label}`;
+        recentAutoNewBySession.set(newSessionKey, {
+          newLabel: label,
+          previousLabel: activeTopic.label,
+          previousDisplayName: activeTopic.displayName,
+          createdAt: Date.now(),
+        });
       }
 
       registry.getOrCreate(label, fallbackName);

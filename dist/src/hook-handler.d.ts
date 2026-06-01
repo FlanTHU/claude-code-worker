@@ -3,6 +3,14 @@ import type { TopicRegistry } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
 import type { FeedbackStore } from './feedback-store.js';
 import type { ContextBridge } from './context-bridge.js';
+export interface RecentAutoNew {
+    newLabel: string;
+    previousLabel: string;
+    previousDisplayName: string;
+    createdAt: number;
+}
+export declare function getRecentAutoNew(sessionKey: string): RecentAutoNew | null;
+export declare function clearRecentAutoNew(sessionKey: string): void;
 /**
  * Session routing approach:
  * - Classify message → determine topic

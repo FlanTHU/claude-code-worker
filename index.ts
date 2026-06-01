@@ -1,5 +1,5 @@
 import { TopicRegistry } from './src/topic-registry.js';
-import { handleBeforeDispatch } from './src/hook-handler.js';
+import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew } from './src/hook-handler.js';
 import { FeedbackStore } from './src/feedback-store.js';
 import { ContextBridge } from './src/context-bridge.js';
 import type { TopicRouterConfig } from './src/types.js';
@@ -243,7 +243,14 @@ export default definePluginEntry({
 
         const topic = registry.get(label);
         const displayName = topic?.displayName ?? label;
-        const footer = `\n\n---\n📌 话题: ${displayName}`;
+        const autoNew = getRecentAutoNew(sessionKey);
+        let footer: string;
+        if (autoNew && autoNew.newLabel === label) {
+          footer = `\n\n---\n📌 新话题: ${displayName} | 如非新话题，发送 \`/switch ${autoNew.previousLabel}\` 回到「${autoNew.previousDisplayName}」`;
+          clearRecentAutoNew(sessionKey);
+        } else {
+          footer = `\n\n---\n📌 话题: ${displayName}`;
+        }
 
         log.info(`[topic-router-output] Appending footer for topic "${label}" (${displayName})`);
 

@@ -4,6 +4,36 @@
  * These commands are intercepted before the before_dispatch hook
  * and provide the user interface for topic management.
  */
+function findSimilarTopics(query, topics, maxResults) {
+    if (topics.length === 0)
+        return [];
+    const q = query.toLowerCase();
+    const scored = topics.map(t => {
+        const label = t.label.toLowerCase();
+        const name = t.displayName.toLowerCase();
+        let score = 0;
+        if (label.includes(q) || q.includes(label))
+            score += 3;
+        if (name.includes(q) || q.includes(name))
+            score += 3;
+        for (const kw of t.keywords) {
+            if (q.includes(kw.toLowerCase()))
+                score += 1;
+        }
+        // Character overlap for fuzzy matching
+        const chars = new Set(q);
+        for (const c of name) {
+            if (chars.has(c))
+                score += 0.1;
+        }
+        return { topic: t, score };
+    });
+    return scored
+        .filter(s => s.score > 0.5)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxResults)
+        .map(s => s.topic);
+}
 // ---------------------------------------------------------------------------
 // /topics — List all active topics
 // ---------------------------------------------------------------------------
@@ -64,6 +94,15 @@ const handleSwitch = async ({ args, registry, log, feedbackStore, contextBridge 
     }
     const topic = registry.get(label) ?? registry.findByDisplayName(label);
     if (!topic) {
+        const allTopics = registry.getAll();
+        const suggestions = findSimilarTopics(label, allTopics, 3);
+        if (suggestions.length > 0) {
+            const lines = [`⚠️ 未找到话题 "${label}"，你是否想切换到：\n`];
+            for (const s of suggestions) {
+                lines.push(`  • \`/switch ${s.label}\` — ${s.displayName}`);
+            }
+            return { handled: true, text: lines.join('\n') };
+        }
         return {
             handled: true,
             text: `⚠️ 未找到话题 "${label}"。使用 \`/topics\` 查看所有话题。`,
