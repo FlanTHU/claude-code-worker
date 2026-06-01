@@ -115,6 +115,42 @@ export default definePluginEntry({
                 if (!topic) {
                     return { text: `⚠️ 未找到话题 "${label}"。使用 \`/topics\` 查看所有话题。` };
                 }
+                const currentTopic = registry.getActive();
+                // V4: Soft Fork merge-back
+                if (currentTopic) {
+                    const fork = contextBridge.checkMerge(currentTopic.label, label);
+                    if (fork) {
+                        contextBridge.markMerged(fork);
+                        registry.markEnded(currentTopic.label);
+                        registry.setActive(label);
+                        cmdLog(`Merged back: ${currentTopic.label} → ${label}`);
+                        feedbackStore.record('immediate_switch_back', {
+                            fromTopic: currentTopic.label,
+                            toTopic: label,
+                            classifierLayer: 'command',
+                            confidence: 1.0,
+                            messageSnippet: `/switch ${label}`,
+                        });
+                        return {
+                            text: `🔄 已合并回话题 **${topic.displayName}**（自动创建的「${currentTopic.displayName}」已结束）`,
+                        };
+                    }
+                    // V4: Feedback — correction detection
+                    const lastRoute = feedbackStore.getLastRoute();
+                    if (lastRoute && lastRoute.topic !== label) {
+                        const elapsed = Date.now() - lastRoute.timestamp;
+                        if (elapsed < 60_000) {
+                            feedbackStore.record('manual_switch_after_auto', {
+                                fromTopic: lastRoute.topic,
+                                toTopic: label,
+                                classifierLayer: lastRoute.layer,
+                                confidence: lastRoute.confidence,
+                                messageSnippet: `/switch ${label}`,
+                            });
+                            cmdLog(`Feedback: correction ${lastRoute.topic} → ${label}`);
+                        }
+                    }
+                }
                 registry.setActive(label);
                 cmdLog(`Switched to topic: ${label}`);
                 return {
