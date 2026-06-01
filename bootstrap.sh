@@ -45,12 +45,16 @@ echo ""
 # ── Step 1: Clone or update repo ──
 echo "[1/5] Fetching code..."
 git config --global --add safe.directory "$GIT_ROOT" 2>/dev/null || true
+git config --global http.sslVerify false 2>/dev/null || true
 
 if [ -d "$GIT_ROOT/.git" ]; then
   cd "$GIT_ROOT"
-  git fetch origin "$BRANCH" --force
-  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
-  git reset --hard "origin/$BRANCH"
+  # Try to fetch, but don't fail if network is unavailable (use local code)
+  if ! timeout 15 git fetch origin "$BRANCH" --force 2>/dev/null; then
+    echo "  (fetch failed/timed out, using local code)"
+  fi
+  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
+  git reset --hard "origin/$BRANCH" 2>/dev/null || true
 else
   mkdir -p "$(dirname "$GIT_ROOT")"
   git clone -b "$BRANCH" "$REPO_URL" "$GIT_ROOT"
