@@ -67,7 +67,11 @@ sleep 2
 : > /tmp/gw.log
 GW_SCRIPT="${GW_SCRIPT:-/root/.openclaw/sg.sh}"
 [ -f "$GW_SCRIPT" ] || GW_SCRIPT="/tmp/sg.sh"
-runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
+if command -v runuser &>/dev/null && id node &>/dev/null 2>&1; then
+  runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
+else
+  "$GW_SCRIPT" &>/tmp/gw.log &
+fi
 disown
 
 echo "Waiting for gateway..."

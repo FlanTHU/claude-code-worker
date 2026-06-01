@@ -162,7 +162,11 @@ chmod +x "$GW_SCRIPT"
 ln -sf "$GW_SCRIPT" /tmp/sg.sh
 
 : > /tmp/gw.log
-runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
+if [ "${GW_RUN_CMD:-}" = "direct" ] || ! command -v runuser &>/dev/null || ! id node &>/dev/null 2>&1; then
+  "$GW_SCRIPT" &>/tmp/gw.log &
+else
+  runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
+fi
 disown
 
 echo "  Waiting for gateway..."
