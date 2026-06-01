@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 const COMMAND_PATTERNS = [
     { regex: /^\/switch\s+(\S+)/i, action: 'switch' },
-    { regex: /^\/new(?:\s+(.*))?$/i, action: 'new' },
+    { regex: /^\/newtopic(?:\s+(.*))?$/i, action: 'new' },
     { regex: /^\/end(?:\s+(.*))?$/i, action: 'passthrough' },
 ];
 export function parseExplicitCommand(content) {

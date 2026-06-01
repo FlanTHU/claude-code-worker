@@ -174,7 +174,8 @@ export async function handleBeforeDispatch(params) {
     }
     const trimmed = content.trim();
     // Commands are handled directly (they return text, no routing needed)
-    if (/^\/(topics|switch|newtopic|new|endall|end)\b/i.test(trimmed)) {
+    // Note: /new is NOT intercepted here — it's reserved for gateway's native "new session" command
+    if (/^\/(topics|switch|newtopic|endall|end)\b/i.test(trimmed)) {
         const cmdResult = await tryHandleCommand(content, registry, config, log, feedbackStore, contextBridge);
         if (cmdResult)
             return cmdResult;

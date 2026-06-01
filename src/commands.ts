@@ -253,7 +253,6 @@ const handleEndAll: CommandHandler = async ({ registry, log }) => {
 const COMMANDS: Record<string, CommandHandler> = {
   topics: handleTopics,
   switch: handleSwitch,
-  new: handleNew,
   newtopic: handleNew,
   end: handleEnd,
   endall: handleEndAll,

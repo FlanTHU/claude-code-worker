@@ -201,7 +201,6 @@ const handleEndAll = async ({ registry, log }) => {
 const COMMANDS = {
     topics: handleTopics,
     switch: handleSwitch,
-    new: handleNew,
     newtopic: handleNew,
     end: handleEnd,
     endall: handleEndAll,
