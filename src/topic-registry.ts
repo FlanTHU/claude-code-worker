@@ -62,6 +62,14 @@ export class TopicRegistry {
     return this.data.topics[label];
   }
 
+  findByDisplayName(query: string): TopicEntry | undefined {
+    this.reload();
+    const q = query.toLowerCase();
+    const topics = Object.values(this.data.topics).filter(t => t.status !== 'ended');
+    return topics.find(t => t.displayName.toLowerCase() === q)
+      ?? topics.find(t => t.displayName.toLowerCase().includes(q));
+  }
+
   getAll(): TopicEntry[] {
     this.reload();
     return Object.values(this.data.topics).filter(t => t.status !== 'ended');

@@ -62,7 +62,7 @@ const handleSwitch = async ({ args, registry, log, feedbackStore, contextBridge 
         }
         return { handled: true, text: lines.join('\n') };
     }
-    const topic = registry.get(label);
+    const topic = registry.get(label) ?? registry.findByDisplayName(label);
     if (!topic) {
         return {
             handled: true,

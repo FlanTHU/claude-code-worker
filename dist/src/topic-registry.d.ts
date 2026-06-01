@@ -12,6 +12,7 @@ export declare class TopicRegistry {
     private reload;
     getActive(): TopicEntry | null;
     get(label: string): TopicEntry | undefined;
+    findByDisplayName(query: string): TopicEntry | undefined;
     getAll(): TopicEntry[];
     getActiveTopics(): TopicEntry[];
     getInactiveTopics(): TopicEntry[];

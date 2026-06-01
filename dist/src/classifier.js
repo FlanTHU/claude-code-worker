@@ -96,8 +96,31 @@ export function detectContinuation(content, _recentMessages, activeTopic) {
     return null;
 }
 // ---------------------------------------------------------------------------
-// LLM-based classification
+// LLM-based classification (with circuit breaker)
 // ---------------------------------------------------------------------------
+let llmFailCount = 0;
+let llmCircuitOpenUntil = 0;
+const LLM_CIRCUIT_THRESHOLD = 3;
+const LLM_CIRCUIT_COOLDOWN = 60_000;
+export function isLLMCircuitOpen() {
+    if (Date.now() < llmCircuitOpenUntil)
+        return true;
+    if (llmCircuitOpenUntil > 0 && Date.now() >= llmCircuitOpenUntil) {
+        llmFailCount = 0;
+        llmCircuitOpenUntil = 0;
+    }
+    return false;
+}
+function recordLLMFailure() {
+    llmFailCount++;
+    if (llmFailCount >= LLM_CIRCUIT_THRESHOLD) {
+        llmCircuitOpenUntil = Date.now() + LLM_CIRCUIT_COOLDOWN;
+    }
+}
+function recordLLMSuccess() {
+    llmFailCount = 0;
+    llmCircuitOpenUntil = 0;
+}
 const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
     const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
@@ -129,7 +152,7 @@ ${recentCtx}
     };
     log(`[classifier-llm] Calling LLM for classification...`);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
         const headers = { 'Content-Type': 'application/json' };
         if (llmConfig.apiKey) {
@@ -143,18 +166,23 @@ ${recentCtx}
         });
         if (!response.ok) {
             log(`[classifier-llm] HTTP ${response.status}, falling back to rules`);
+            recordLLMFailure();
             return null;
         }
         const data = await response.json();
         const raw = data?.choices?.[0]?.message?.content ?? '';
         log(`[classifier-llm] Raw response: ${raw.slice(0, 200)}`);
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (!jsonMatch)
+        if (!jsonMatch) {
+            recordLLMFailure();
             return null;
+        }
         const parsed = JSON.parse(jsonMatch[0]);
         const action = parsed.action;
-        if (!['continue', 'switch', 'new'].includes(action))
+        if (!['continue', 'switch', 'new'].includes(action)) {
+            recordLLMFailure();
             return null;
+        }
         let targetLabel = parsed.label || null;
         if (action === 'new') {
             return {
@@ -180,6 +208,7 @@ ${recentCtx}
         if (action === 'continue') {
             targetLabel = activeTopic?.label ?? null;
         }
+        recordLLMSuccess();
         return {
             action,
             targetLabel,
@@ -189,6 +218,7 @@ ${recentCtx}
     }
     catch (err) {
         log(`[classifier-llm] Error: ${err?.message}, falling back to rules`);
+        recordLLMFailure();
         return null;
     }
     finally {
@@ -275,12 +305,17 @@ export async function classify(content, recentMessages, registry, config, llmCon
             }
         }
     }
-    // L2: LLM fallback for ambiguous cases
+    // L2: LLM fallback for ambiguous cases (with circuit breaker)
     const useHybrid = config.classifier.mode === 'hybrid' || config.classifier.mode === 'llm';
     if (useHybrid && llmConfig?.apiKey) {
-        const llmResult = await classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, _log);
-        if (llmResult)
-            return llmResult;
+        if (isLLMCircuitOpen()) {
+            _log(`[classifier-llm] Circuit open, skipping LLM (cooldown 60s)`);
+        }
+        else {
+            const llmResult = await classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, _log);
+            if (llmResult)
+                return llmResult;
+        }
     }
     // L3: Fallback rules (if LLM unavailable or failed)
     if (activeTopic && activeTopic.messageCount > 0) {
@@ -331,12 +366,23 @@ export async function classify(content, recentMessages, registry, config, llmCon
     }
     if (keywordResult)
         return keywordResult;
-    // No active topic, no keyword match → passthrough to default session
+    // No active topic — check if message is substantial enough to create new topic
+    const trimmedFinal = content.trim();
+    const isFinalSubstantial = trimmedFinal.length > 6;
+    if (isFinalSubstantial) {
+        return {
+            action: 'new',
+            targetLabel: null,
+            confidence: 0.7,
+            reason: 'No active topic + substantial message → auto-create new topic',
+        };
+    }
+    // No active topic, short message → passthrough
     return {
         action: 'passthrough',
         targetLabel: null,
         confidence: 0.7,
-        reason: 'No active topic, no keyword match → passthrough',
+        reason: 'No active topic + short message → passthrough',
     };
 }
 // ---------------------------------------------------------------------------

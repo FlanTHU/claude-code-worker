@@ -43,7 +43,7 @@ async function extractKeywords(content, existingKeywords, llmConfig, log) {
         temperature: 0.1,
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
         const headers = { 'Content-Type': 'application/json' };
         if (llmConfig.apiKey)
@@ -111,7 +111,7 @@ async function deriveDisplayName(content, llmConfig, log) {
         temperature: 0.1,
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
         const headers = { 'Content-Type': 'application/json' };
         if (llmConfig.apiKey)
@@ -257,12 +257,12 @@ export async function handleBeforeDispatch(params) {
         case 'switch': {
             if (!result.targetLabel)
                 return undefined;
-            const topic = registry.get(result.targetLabel);
+            const topic = registry.get(result.targetLabel) ?? registry.findByDisplayName(result.targetLabel);
             if (!topic) {
                 log(`Switch target "${result.targetLabel}" not found, passthrough`);
                 return undefined;
             }
-            topicLabel = result.targetLabel;
+            topicLabel = topic.label;
             registry.setActive(topicLabel);
             break;
         }
