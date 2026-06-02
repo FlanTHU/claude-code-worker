@@ -62,8 +62,9 @@ fi
 
 echo ""
 echo "=== Step 4: Restart gateway ==="
-pkill -9 -f "openclaw gateway" 2>/dev/null || true
-sleep 2
+# Kill all openclaw processes (the binary is just "openclaw", not "openclaw gateway")
+kill -9 $(pgrep -x openclaw) 2>/dev/null || true
+sleep 3
 : > /tmp/gw.log
 GW_SCRIPT="${GW_SCRIPT:-/root/.openclaw/sg.sh}"
 [ -f "$GW_SCRIPT" ] || GW_SCRIPT="/tmp/sg.sh"
@@ -75,13 +76,13 @@ fi
 disown
 
 echo "Waiting for gateway..."
-for i in $(seq 1 20); do
+for i in $(seq 1 30); do
   sleep 2
   if grep -q "http server listening" /tmp/gw.log 2>/dev/null; then
     echo "✓ Gateway started (${i}x2s)"
     echo ""
     echo "=== Step 5: Confirm plugin loaded ==="
-    grep "topic-router" /tmp/gw.log
+    grep "topic-router" /tmp/gw.log | head -5
     echo ""
     if grep -q "topic-router" /tmp/gw.log; then
       echo "=== ✓ Deploy complete ==="
@@ -92,6 +93,6 @@ for i in $(seq 1 20); do
     exit 0
   fi
 done
-echo "✗ Gateway not ready after 40s. Last 20 lines:"
+echo "✗ Gateway not ready after 60s. Last 20 lines:"
 tail -20 /tmp/gw.log
 exit 1
