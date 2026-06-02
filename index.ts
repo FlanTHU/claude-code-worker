@@ -53,6 +53,7 @@ export default definePluginEntry({
     // Runtime toggle — persisted to state file, controllable via /topic-router on|off
     const toggleFile = `${stateDir}/enabled.json`;
     let runtimeEnabled = readToggle(toggleFile);
+    log.info(`[topic-router] Runtime enabled: ${runtimeEnabled} (from ${toggleFile})`);
 
     api.registerCommand({
       name: 'topic-router',
@@ -345,10 +346,10 @@ function readToggle(path: string): boolean {
 }
 
 function writeToggle(path: string, enabled: boolean): void {
-  try {
-    const fs = require('fs');
-    fs.writeFileSync(path, JSON.stringify({ enabled, updatedAt: Date.now() }));
-  } catch {}
+  const fs = require('fs');
+  const dir = require('path').dirname(path);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  fs.writeFileSync(path, JSON.stringify({ enabled, updatedAt: Date.now() }));
 }
 
 function formatTimeAgo(timestamp: number): string {
