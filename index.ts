@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew } from './src/hook-handler.js';
 import { FeedbackStore } from './src/feedback-store.js';
@@ -335,21 +337,19 @@ function resolveStateDir(_api: any): string {
   return process.env.TOPIC_ROUTER_STATE_DIR || '/root/.openclaw/topic-router-state';
 }
 
-function readToggle(path: string): boolean {
+function readToggle(filePath: string): boolean {
   try {
-    const fs = require('fs');
-    const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     return data.enabled !== false;
   } catch {
     return true;
   }
 }
 
-function writeToggle(path: string, enabled: boolean): void {
-  const fs = require('fs');
-  const dir = require('path').dirname(path);
+function writeToggle(filePath: string, enabled: boolean): void {
+  const dir = path.dirname(filePath);
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  fs.writeFileSync(path, JSON.stringify({ enabled, updatedAt: Date.now() }));
+  fs.writeFileSync(filePath, JSON.stringify({ enabled, updatedAt: Date.now() }));
 }
 
 function formatTimeAgo(timestamp: number): string {
