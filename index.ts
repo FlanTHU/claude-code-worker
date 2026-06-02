@@ -49,6 +49,32 @@ export default definePluginEntry({
     }
 
     const stateDir = resolveStateDir(api);
+
+    // Runtime toggle — persisted to state file, controllable via /topic-router on|off
+    const toggleFile = `${stateDir}/enabled.json`;
+    let runtimeEnabled = readToggle(toggleFile);
+
+    api.registerCommand({
+      name: 'topic-router',
+      description: '开关话题路由 (/topic-router on|off|status)',
+      acceptsArgs: true,
+      channels: ['feishu'],
+      handler: async (ctx: any) => {
+        const arg = (ctx.args ?? '').trim().toLowerCase();
+        if (arg === 'on') {
+          runtimeEnabled = true;
+          writeToggle(toggleFile, true);
+          return { text: '✅ 话题路由已**开启**' };
+        }
+        if (arg === 'off') {
+          runtimeEnabled = false;
+          writeToggle(toggleFile, false);
+          return { text: '⏸️ 话题路由已**关闭**，消息将直接进入默认 session' };
+        }
+        return { text: `📡 话题路由状态: **${runtimeEnabled ? '开启' : '关闭'}**\n\n使用 \`/topic-router on\` 或 \`/topic-router off\` 切换` };
+      },
+    });
+
     const registry = new TopicRegistry(stateDir);
     const feedbackStore = new FeedbackStore(stateDir);
     const contextBridge = new ContextBridge(stateDir);
@@ -202,6 +228,7 @@ export default definePluginEntry({
     log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: session routing (full agent pipeline)`);
 
     const hookHandler = async (event: any, ctx: any) => {
+      if (!runtimeEnabled) return undefined;
       log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
       try {
         const result = await handleBeforeDispatch({
@@ -227,6 +254,7 @@ export default definePluginEntry({
     // ── Output hook: append topic footer to replies from topic sessions ──
     if (pluginConfig.replyFooter) {
       const outputHandler = (event: any, ctx: any) => {
+        if (!runtimeEnabled) return;
         const sessionKey: string = ctx?.sessionKey || event?.sessionKey || '';
         log.info(`[topic-router-output] hook fired. sessionKey="${sessionKey}" eventKeys=${JSON.stringify(Object.keys(event ?? {}))} ctxKeys=${JSON.stringify(Object.keys(ctx ?? {}))}`);
 
@@ -304,6 +332,23 @@ export default definePluginEntry({
 
 function resolveStateDir(_api: any): string {
   return process.env.TOPIC_ROUTER_STATE_DIR || '/root/.openclaw/topic-router-state';
+}
+
+function readToggle(path: string): boolean {
+  try {
+    const fs = require('fs');
+    const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+    return data.enabled !== false;
+  } catch {
+    return true;
+  }
+}
+
+function writeToggle(path: string, enabled: boolean): void {
+  try {
+    const fs = require('fs');
+    fs.writeFileSync(path, JSON.stringify({ enabled, updatedAt: Date.now() }));
+  } catch {}
 }
 
 function formatTimeAgo(timestamp: number): string {
