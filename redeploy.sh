@@ -41,6 +41,8 @@ echo ""
 echo "=== Step 2.5: Ensure writable state dirs ==="
 STATE_DIR="/root/.openclaw/topic-router-state"
 mkdir -p "$STATE_DIR" /root/.openclaw/devices /root/.openclaw/logs/traces
+# Allow node user to traverse /root and reach state dirs
+chmod o+x /root /root/.openclaw
 chmod 777 "$STATE_DIR" /root/.openclaw/devices /root/.openclaw/logs /root/.openclaw/logs/traces
 # Ensure existing files are writable by node user
 find "$STATE_DIR" /root/.openclaw/devices /root/.openclaw/logs -maxdepth 1 -type f -exec chmod 666 {} \; 2>/dev/null || true
