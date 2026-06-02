@@ -41,11 +41,16 @@ cd /root/.openclaw/workspace/code-repo && bash redeploy.sh
 
 | 命令 | 作用 | 示例 |
 |------|------|------|
+| `/topic-router on` | 开启话题路由 | `/topic-router on` |
+| `/topic-router off` | 关闭话题路由（消息直接进入默认 session） | `/topic-router off` |
+| `/topic-router` | 查看当前开关状态 | `/topic-router` |
 | `/topics` | 查看所有话题列表 | `/topics` |
-| `/switch <标签>` | 切换到指定话题 | `/switch coding` |
+| `/switch <标签>` | 切换到指定话题（支持中文名称模糊匹配） | `/switch coding` 或 `/switch Redis缓存` |
 | `/newtopic <标签>` | 手动创建新话题 | `/newtopic travel` |
 | `/end` | 结束当前话题 | `/end` |
 | `/endall` | 清理全部话题 | `/endall` |
+
+> `/topic-router off` 关闭后，所有消息直接进入默认 session，不做话题分类和路由。`/topics`、`/switch` 等管理命令仍然可用。开关状态持久化到磁盘，gateway 重启后保持。
 
 > 大多数情况下不需要手动操作。直接聊天，系统会自动识别和路由。命令主要用于纠正误判。
 
@@ -118,11 +123,20 @@ cd /root/.openclaw/workspace/code-repo && bash redeploy.sh
 - 全部正确 → 适当降低阈值（更果断）
 - 调整幅度非对称（+0.03 / -0.02），宁可保守
 
+### 运行时开关
+
+通过 `/topic-router on|off` 可随时开关话题路由功能：
+
+- **关闭 (`off`)**：`before_dispatch` hook 和 output hook 均跳过，消息直接进入默认 session，无话题 footer
+- **开启 (`on`)**：恢复自动路由
+- **状态查询**：不带参数的 `/topic-router` 查看当前状态
+- **持久化**：开关状态写入 `{stateDir}/enabled.json`，gateway 重启后自动恢复
+
 ### 回复中的话题标记
 
 每条 AI 回复末尾显示当前话题：`📌 话题: Redis缓存编码`
 
-引用带话题标记的消息回复时，系统自动路由到该话题。
+引用带话题标记的消息回复时，系统自动路由到该话题（自动切换到被引用消息所属的话题）。
 
 ### FAQ
 
