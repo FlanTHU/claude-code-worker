@@ -200,7 +200,7 @@ export default definePluginEntry({
         };
         log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: session routing (full agent pipeline)`);
         const hookHandler = async (event, ctx) => {
-            if (!runtimeEnabled)
+            if (!readToggle(toggleFile))
                 return undefined;
             log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
             try {
@@ -226,7 +226,7 @@ export default definePluginEntry({
         // ── Output hook: append topic footer to replies from topic sessions ──
         if (pluginConfig.replyFooter) {
             const outputHandler = (event, ctx) => {
-                if (!runtimeEnabled)
+                if (!readToggle(toggleFile))
                     return;
                 const sessionKey = ctx?.sessionKey || event?.sessionKey || '';
                 log.info(`[topic-router-output] hook fired. sessionKey="${sessionKey}" eventKeys=${JSON.stringify(Object.keys(event ?? {}))} ctxKeys=${JSON.stringify(Object.keys(ctx ?? {}))}`);
