@@ -100,14 +100,14 @@ async function extractKeywords(content, existingKeywords, llmConfig, log) {
 }
 function deriveDisplayNameFallback(content) {
     const trimmed = content.trim().replace(/\s+/g, ' ');
-    const maxLen = 15;
+    const maxLen = 8;
     if (trimmed.length <= maxLen)
         return trimmed;
     return trimmed.slice(0, maxLen) + '…';
 }
 async function deriveDisplayName(content, llmConfig, log) {
     const fallback = deriveDisplayNameFallback(content);
-    if (!llmConfig?.apiKey)
+    if (!llmConfig?.baseUrl && !llmConfig?.apiKey)
         return fallback;
     const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
     const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
@@ -117,7 +117,7 @@ async function deriveDisplayName(content, llmConfig, log) {
         messages: [
             {
                 role: 'system',
-                content: '用2-4个词命名话题，只返回名称。例：帮我写redis缓存代码→Redis缓存编码，明天北京下雨吗→北京天气',
+                content: '用2-6字命名话题，只返回名称，不超过6个汉字。例：帮我写redis缓存代码→Redis缓存，明天北京下雨吗→北京天气，小腿肌肉一直抽动→肌肉抽动',
             },
             { role: 'user', content: content.slice(0, 100) },
         ],
@@ -147,7 +147,7 @@ async function deriveDisplayName(content, llmConfig, log) {
             return fallback;
         const lines = raw.split('\n').filter((l) => l.trim());
         const answer = lines[lines.length - 1]?.trim().replace(/^["""]+|["""]+$/g, '') ?? '';
-        if (answer && answer.length <= 20 && answer.length >= 2) {
+        if (answer && answer.length <= 12 && answer.length >= 2) {
             log(`[hook-handler] Generated display name: "${answer}" (from ${contentText ? 'content' : 'reasoning'})`);
             return answer;
         }
