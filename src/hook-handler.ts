@@ -259,6 +259,11 @@ export async function handleBeforeDispatch(params: {
 
   // Commands are handled directly (they return text, no routing needed)
   // Note: /new is NOT intercepted here — it's reserved for gateway's native "new session" command
+  // /topic-router is handled by registerCommand, skip routing for it
+  if (/^\/topic-router\b/i.test(trimmed)) {
+    return undefined;
+  }
+
   if (/^\/(topics|switch|newtopic|endall|end)\b/i.test(trimmed)) {
     const cmdResult = await tryHandleCommand(content, registry, config, log, feedbackStore, contextBridge);
     if (cmdResult) return cmdResult;
