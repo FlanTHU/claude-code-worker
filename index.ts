@@ -64,12 +64,12 @@ export default definePluginEntry({
         const arg = (ctx.args ?? '').trim().toLowerCase();
         if (arg === 'on') {
           runtimeEnabled = true;
-          writeToggle(toggleFile, true);
+          try { writeToggle(toggleFile, true); } catch {}
           return { text: '✅ 话题路由已**开启**' };
         }
         if (arg === 'off') {
           runtimeEnabled = false;
-          writeToggle(toggleFile, false);
+          try { writeToggle(toggleFile, false); } catch {}
           return { text: '⏸️ 话题路由已**关闭**，消息将直接进入默认 session' };
         }
         return { text: `📡 话题路由状态: **${runtimeEnabled ? '开启' : '关闭'}**\n\n使用 \`/topic-router on\` 或 \`/topic-router off\` 切换` };
