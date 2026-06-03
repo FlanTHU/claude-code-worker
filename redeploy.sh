@@ -95,7 +95,8 @@ export XDG_DATA_HOME=/root/.openclaw/xdg-data
 GW_PORT="${GW_PORT:-18789}"
 
 if command -v runuser &>/dev/null && id node &>/dev/null 2>&1; then
-  runuser -u node -- openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
+  runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR="$SYSTEM_PROMPTS_DIR" XDG_DATA_HOME="$XDG_DATA_HOME" \
+    openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
 else
   openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
 fi
