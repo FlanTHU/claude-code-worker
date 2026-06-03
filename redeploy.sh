@@ -8,6 +8,7 @@ DST="/app/dist/extensions/topic-router/src"
 BRANCH="main"
 
 cd "$REPO_DIR"
+git config --global --add safe.directory "$REPO_DIR"
 
 echo "=== Step 1: Fetch latest code ==="
 SELF="$REPO_DIR/redeploy.sh"
@@ -26,6 +27,7 @@ fi
 
 echo ""
 echo "=== Step 2: Copy dist files ==="
+mkdir -p "$DST"
 git show HEAD:dist/src/hook-handler.js > "$DST/hook-handler.js"
 git show HEAD:dist/src/classifier.js > "$DST/classifier.js"
 git show HEAD:dist/src/commands.js > "$DST/commands.js"
