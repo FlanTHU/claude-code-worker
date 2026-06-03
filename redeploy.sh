@@ -84,8 +84,10 @@ fi
 
 echo ""
 echo "=== Step 4: Restart gateway ==="
-# Kill all openclaw processes (the binary is just "openclaw", not "openclaw gateway")
-kill -9 $(pgrep -x openclaw) 2>/dev/null || true
+# Stop gateway: try official command first, then fallback to kill
+openclaw gateway stop 2>/dev/null || kill -9 $(pgrep -x openclaw) 2>/dev/null || true
+# Also kill by port in case process name differs
+fuser -k 18789/tcp 2>/dev/null || true
 sleep 3
 : > /tmp/gw.log
 
