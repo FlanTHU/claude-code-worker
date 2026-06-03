@@ -3,7 +3,8 @@
 # Usage: bash redeploy.sh (from any directory)
 set -e
 
-REPO_DIR="/root/.openclaw/workspace/code-repo/openclaw-topic-router"
+# Auto-detect repo dir: use script's own location
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DST="/app/dist/extensions/topic-router/src"
 BRANCH="main"
 
