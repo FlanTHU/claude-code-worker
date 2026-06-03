@@ -111,6 +111,21 @@ fi
 
 : > /tmp/gw.log
 
+# Ensure plugin enabled in config BEFORE starting gateway
+OCJSON="/root/.openclaw/openclaw.json"
+if [ -f "$OCJSON" ]; then
+  python3 -c "
+import json
+with open('$OCJSON') as f:
+    cfg = json.load(f)
+if 'plugins' not in cfg: cfg['plugins'] = {}
+if 'entries' not in cfg['plugins']: cfg['plugins']['entries'] = {}
+cfg['plugins']['entries']['topic-router'] = {'enabled': True}
+with open('$OCJSON', 'w') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+" 2>/dev/null && echo "  Config: topic-router enabled" || true
+fi
+
 # Start gateway directly — no external script dependency
 export HOME=/root
 export SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts
@@ -134,6 +149,28 @@ for i in $(seq 1 30); do
     echo "=== Step 5: Confirm plugin loaded ==="
     grep "topic-router" /tmp/gw.log | head -5
     echo ""
+
+    # Ensure plugin enabled in config (gateway may reset on boot)
+    OCJSON="/root/.openclaw/openclaw.json"
+    if [ -f "$OCJSON" ]; then
+      python3 -c "
+import json
+with open('$OCJSON') as f:
+    cfg = json.load(f)
+entries = cfg.get('plugins', {}).get('entries', {})
+tr = entries.get('topic-router', {})
+if not tr.get('enabled', False):
+    if 'plugins' not in cfg: cfg['plugins'] = {}
+    if 'entries' not in cfg['plugins']: cfg['plugins']['entries'] = {}
+    cfg['plugins']['entries']['topic-router'] = {'enabled': True}
+    with open('$OCJSON', 'w') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    print('  Fixed: re-enabled topic-router in openclaw.json')
+else:
+    print('  Plugin enabled in config ✓')
+" 2>/dev/null || true
+    fi
+
     if grep -q "topic-router" /tmp/gw.log; then
       echo "=== ✓ Deploy complete ==="
     else

@@ -200,6 +200,29 @@ for i in $(seq 1 25); do
   fi
 done
 
+# Re-ensure plugin enabled AFTER gateway starts (gateway may reset config on boot)
+sleep 2
+if [ -f "$OCJSON" ]; then
+  python3 -c "
+import json
+with open('$OCJSON') as f:
+    cfg = json.load(f)
+changed = False
+entries = cfg.get('plugins', {}).get('entries', {})
+tr = entries.get('topic-router', {})
+if not tr.get('enabled', False):
+    if 'plugins' not in cfg: cfg['plugins'] = {}
+    if 'entries' not in cfg['plugins']: cfg['plugins']['entries'] = {}
+    cfg['plugins']['entries']['topic-router'] = {'enabled': True}
+    with open('$OCJSON', 'w') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    print('  Re-enabled topic-router in openclaw.json (gateway had reset it)')
+    changed = True
+if not changed:
+    print('  Plugin already enabled in openclaw.json')
+" 2>/dev/null || true
+fi
+
 # ── Step 5: Verify ──
 echo ""
 echo "[5/5] Verification..."
@@ -257,22 +280,49 @@ if [ ! -f "$EXT_DIR/index.js" ]; then
   fi
 else
   # Extension exists but patches might be gone (new gateway binary)
+  NEED_RESTART=0
   if ! grep -q "session re-routed" /app/dist/dispatch-*.js 2>/dev/null; then
     echo "Gateway patches missing, re-applying..."
     bash "$GIT_ROOT/patch-gateway.sh"
-    # Restart gateway to pick up patches
+    NEED_RESTART=1
+  fi
+
+  # Always ensure config has plugin enabled
+  OCJSON="/root/.openclaw/openclaw.json"
+  if [ -f "$OCJSON" ]; then
+    python3 -c "
+import json
+with open('$OCJSON') as f:
+    cfg = json.load(f)
+if 'plugins' not in cfg: cfg['plugins'] = {}
+if 'entries' not in cfg['plugins']: cfg['plugins']['entries'] = {}
+tr = cfg['plugins']['entries'].get('topic-router', {})
+if not tr.get('enabled', False):
+    cfg['plugins']['entries']['topic-router'] = {'enabled': True}
+    with open('$OCJSON', 'w') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    print('Re-enabled topic-router in config')
+" 2>/dev/null || true
+  fi
+
+  if [ "$NEED_RESTART" = "1" ]; then
     openclaw gateway stop 2>/dev/null || true
     pkill -9 -f "openclaw gateway" 2>/dev/null || true
     kill -9 $(pgrep -x openclaw) 2>/dev/null || true
     fuser -k 18789/tcp 2>/dev/null || lsof -t -i:18789 2>/dev/null | xargs kill -9 2>/dev/null || true
     sleep 2
-    GW_SCRIPT="/root/.openclaw/sg.sh"
-    if [ -f "$GW_SCRIPT" ]; then
-      : > /tmp/gw.log
-      runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
-      disown
-      echo "Gateway restarted with patches"
+    : > /tmp/gw.log
+    export HOME=/root
+    export SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts
+    export XDG_DATA_HOME=/root/.openclaw/xdg-data
+    if command -v runuser &>/dev/null && id node &>/dev/null 2>&1; then
+      runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR="$SYSTEM_PROMPTS_DIR" XDG_DATA_HOME="$XDG_DATA_HOME" \
+        openclaw gateway --port 18789 --verbose &>/tmp/gw.log &
+    else
+      openclaw gateway --port 18789 --verbose &>/tmp/gw.log &
     fi
+    disown
+    echo "Gateway restarted with patches"
   else
     echo "Everything intact, no action needed"
   fi
