@@ -84,18 +84,37 @@ fi
 
 echo ""
 echo "=== Step 4: Restart gateway ==="
-# Stop gateway: try official command first, then fallback to kill
-openclaw gateway stop 2>/dev/null || kill -9 $(pgrep -x openclaw) 2>/dev/null || true
-# Also kill by port in case process name differs
-fuser -k 18789/tcp 2>/dev/null || true
-sleep 3
+GW_PORT="${GW_PORT:-18789}"
+
+# Stop gateway — multiple strategies for different container setups
+echo "  Stopping old gateway..."
+openclaw gateway stop 2>/dev/null && sleep 2 || true
+# Kill by pgrep (works when binary is named "openclaw")
+kill -9 $(pgrep -x openclaw) 2>/dev/null || true
+# Kill by port (works when process is node running openclaw-gateway)
+if command -v fuser &>/dev/null; then
+  fuser -k "$GW_PORT/tcp" 2>/dev/null || true
+elif command -v lsof &>/dev/null; then
+  lsof -t -i:"$GW_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+else
+  # Last resort: find node process listening on the port
+  ss -tlnp 2>/dev/null | grep ":$GW_PORT" | grep -oP 'pid=\K[0-9]+' | xargs kill -9 2>/dev/null || true
+fi
+sleep 2
+
+# Verify port is free
+if ss -tln 2>/dev/null | grep -q ":$GW_PORT "; then
+  echo "  ⚠️ Port $GW_PORT still in use! Trying harder..."
+  ss -tlnp 2>/dev/null | grep ":$GW_PORT" | grep -oP 'pid=\K[0-9]+' | xargs kill -9 2>/dev/null || true
+  sleep 3
+fi
+
 : > /tmp/gw.log
 
 # Start gateway directly — no external script dependency
 export HOME=/root
 export SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts
 export XDG_DATA_HOME=/root/.openclaw/xdg-data
-GW_PORT="${GW_PORT:-18789}"
 
 if command -v runuser &>/dev/null && id node &>/dev/null 2>&1; then
   runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR="$SYSTEM_PROMPTS_DIR" XDG_DATA_HOME="$XDG_DATA_HOME" \
@@ -108,7 +127,8 @@ disown
 echo "Waiting for gateway..."
 for i in $(seq 1 30); do
   sleep 2
-  if grep -q "http server listening" /tmp/gw.log 2>/dev/null; then
+  # Match multiple possible "started" log patterns
+  if grep -qE "http server listening|listening on.*:$GW_PORT|Gateway.*started|plugins loaded" /tmp/gw.log 2>/dev/null; then
     echo "✓ Gateway started (${i}x2s)"
     echo ""
     echo "=== Step 5: Confirm plugin loaded ==="
@@ -121,6 +141,12 @@ for i in $(seq 1 30); do
       exit 1
     fi
     exit 0
+  fi
+  # Early exit if gateway reports fatal error
+  if grep -qE "failed to start|Cannot find module|SyntaxError" /tmp/gw.log 2>/dev/null; then
+    echo "✗ Gateway failed to start:"
+    grep -E "failed to start|Cannot find|Error|SyntaxError" /tmp/gw.log | head -5
+    exit 1
   fi
 done
 echo "✗ Gateway not ready after 60s. Last 20 lines:"

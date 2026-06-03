@@ -13,9 +13,9 @@
 
 set -e
 
-REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
-REPO_DIR="/root/.openclaw/workspace/code-repo"
-BRANCH="main"
+REPO_URL="${REPO_URL:-https://github.com/FlanTHU/claude-code-worker.git}"
+REPO_DIR="${REPO_DIR:-/root/.openclaw/workspace/code-repo}"
+BRANCH="${BRANCH:-main}"
 
 echo "╔══════════════════════════════════════════════╗"
 echo "║   Topic Router — One-Click Deploy            ║"
@@ -71,7 +71,8 @@ echo "[1/3] Getting code..."
 git config --global http.sslVerify false 2>/dev/null || true
 git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 
-TARBALL_URL="https://github.com/FlanTHU/claude-code-worker/archive/refs/heads/${BRANCH}.tar.gz"
+# Derive tarball URL from REPO_URL (only works for GitHub)
+TARBALL_URL="${REPO_URL%.git}/archive/refs/heads/${BRANCH}.tar.gz"
 
 fetch_via_tarball() {
   echo "  Trying tarball download..."
@@ -101,6 +102,18 @@ if [ -d "$REPO_DIR/.git" ]; then
     git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
     git reset --hard "origin/$BRANCH" 2>/dev/null || true
   fi
+elif [ -d "$REPO_DIR" ]; then
+  # Directory exists but not a git repo (e.g. leftover tarball extract)
+  echo "  Directory exists (no .git), re-cloning..."
+  rm -rf "$REPO_DIR"
+  mkdir -p "$(dirname "$REPO_DIR")"
+  if ! timeout 30 git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR" 2>/dev/null; then
+    warn "git clone failed, trying tarball"
+    if ! fetch_via_tarball; then
+      fail "Cannot download code. Check network connectivity."
+    fi
+  fi
+  cd "$REPO_DIR"
 else
   echo "  Fresh install..."
   mkdir -p "$(dirname "$REPO_DIR")"
