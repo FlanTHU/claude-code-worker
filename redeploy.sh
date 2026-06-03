@@ -13,7 +13,13 @@ git config --global --add safe.directory "$REPO_DIR"
 echo "=== Step 1: Fetch latest code ==="
 SELF="$REPO_DIR/redeploy.sh"
 OLD_HASH=$(md5sum "$SELF" 2>/dev/null | cut -d' ' -f1)
-git fetch origin "$BRANCH" --force
+git config --global http.lowSpeedLimit 1000
+git config --global http.lowSpeedTime 10
+for attempt in 1 2 3; do
+  timeout 30 git fetch origin "$BRANCH" --force && break
+  echo "  (fetch attempt $attempt failed, retrying...)"
+  sleep 2
+done
 git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
 echo "HEAD: $(git log --oneline -1)"
