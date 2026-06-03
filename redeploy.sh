@@ -10,14 +10,16 @@ BRANCH="main"
 cd "$REPO_DIR"
 
 echo "=== Step 1: Fetch latest code ==="
+SELF="$REPO_DIR/redeploy.sh"
+OLD_HASH=$(md5sum "$SELF" 2>/dev/null | cut -d' ' -f1)
 git fetch origin "$BRANCH" --force
 git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
 echo "HEAD: $(git log --oneline -1)"
 
-# Self-update: if the script on disk differs from HEAD, re-exec the latest version
-SELF="$REPO_DIR/redeploy.sh"
-if ! git diff --quiet HEAD -- redeploy.sh 2>/dev/null; then
+# Self-update: re-exec if the script changed
+NEW_HASH=$(md5sum "$SELF" 2>/dev/null | cut -d' ' -f1)
+if [ "$OLD_HASH" != "$NEW_HASH" ]; then
   echo "(redeploy.sh updated, re-executing...)"
   exec bash "$SELF"
 fi
