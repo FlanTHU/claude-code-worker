@@ -55,12 +55,18 @@ if [ -d "$GIT_ROOT/.git" ]; then
   fi
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
   git reset --hard "origin/$BRANCH" 2>/dev/null || true
+elif [ -d "$GIT_ROOT" ]; then
+  # Directory exists but not a git repo (e.g. tarball extract) — init and use as-is
+  cd "$GIT_ROOT"
+  git init -b "$BRANCH" 2>/dev/null || true
+  git remote add origin "$REPO_URL" 2>/dev/null || true
+  echo "  (using existing code directory)"
 else
   mkdir -p "$(dirname "$GIT_ROOT")"
   git clone -b "$BRANCH" "$REPO_URL" "$GIT_ROOT"
   cd "$GIT_ROOT"
 fi
-echo "  HEAD: $(git log --oneline -1)"
+echo "  HEAD: $(git log --oneline -1 2>/dev/null || echo 'tarball (no git history)')"
 
 if [ ! -d "$PLUGIN_DIR/dist" ]; then
   echo "  ERROR: $PLUGIN_DIR/dist not found"

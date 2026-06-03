@@ -113,7 +113,7 @@ else
   cd "$REPO_DIR"
 fi
 
-echo "  HEAD: $(git log --oneline -1)"
+echo "  HEAD: $(git log --oneline -1 2>/dev/null || echo 'tarball (no git history)')"
 
 # Verify dist exists
 if [ ! -d "$REPO_DIR/dist" ]; then
