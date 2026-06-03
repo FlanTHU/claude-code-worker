@@ -88,25 +88,16 @@ kill -9 $(pgrep -x openclaw) 2>/dev/null || true
 sleep 3
 : > /tmp/gw.log
 
-# Find startup script or run directly
-GW_SCRIPT="${GW_SCRIPT:-/root/.openclaw/sg.sh}"
-if [ ! -f "$GW_SCRIPT" ]; then
-  # No sg.sh — create minimal inline startup
-  GW_SCRIPT="/tmp/sg.sh"
-  cat > "$GW_SCRIPT" << 'GWEOF'
-#!/bin/bash
+# Start gateway directly — no external script dependency
 export HOME=/root
 export SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts
 export XDG_DATA_HOME=/root/.openclaw/xdg-data
-exec openclaw gateway --port 18789 --verbose
-GWEOF
-  chmod +x "$GW_SCRIPT"
-fi
+GW_PORT="${GW_PORT:-18789}"
 
 if command -v runuser &>/dev/null && id node &>/dev/null 2>&1; then
-  runuser -u node -- bash "$GW_SCRIPT" &>/tmp/gw.log &
+  runuser -u node -- openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
 else
-  bash "$GW_SCRIPT" &>/tmp/gw.log &
+  openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
 fi
 disown
 
