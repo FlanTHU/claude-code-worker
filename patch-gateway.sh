@@ -37,32 +37,30 @@ for old, new in [
     if old in content:
         content = content.replace(old, new, 1)
 
-# Insert routing code after handled block
+# Insert routing code after the before_dispatch block closes, before reply_dispatch
 lines = content.split('\n')
 insert_idx = -1
-found_marker = False
+
+# Strategy 1: find closing of 'if (hookRunner?.hasHooks(\"before_dispatch\"))' block
+# by locating 'reply_dispatch' hook check that follows it
 for i, line in enumerate(lines):
-    if 'before_dispatch_handled' in line and 'recordProcessed' in line:
-        found_marker = True
-        continue
-    if found_marker and 'return attachSourceReplyDeliveryMode' in line:
-        brace_count = 0
-        started = False
-        for j in range(i, min(i + 10, len(lines))):
-            for ch in lines[j]:
-                if ch == '{': brace_count += 1
-                elif ch == '}': brace_count -= 1
-            if 'attachSourceReplyDeliveryMode' in lines[j]:
-                started = True
-            if started and brace_count <= -1:
-                insert_idx = j + 1
-                break
-        if insert_idx == -1:
+    if 'reply_dispatch' in line and 'hasHooks' in line:
+        insert_idx = i
+        break
+
+# Strategy 2 (older gateway): find 'return attachSourceReplyDeliveryMode' after handled block
+if insert_idx == -1:
+    found_marker = False
+    for i, line in enumerate(lines):
+        if 'before_dispatch_handled' in line and 'recordProcessed' in line:
+            found_marker = True
+            continue
+        if found_marker and 'return attachSourceReplyDeliveryMode' in line:
             for j in range(i + 1, min(i + 10, len(lines))):
                 if lines[j].strip() == '}':
                     insert_idx = j + 1
                     break
-        break
+            break
 
 if insert_idx == -1:
     print('ERROR: Could not find insertion point in dispatch')
