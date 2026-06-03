@@ -152,7 +152,17 @@ bash "$PLUGIN_DIR/patch-gateway.sh"
 # ── Step 4: Restart gateway ──
 echo ""
 echo "[4/5] Restarting gateway..."
+GW_PORT="${GW_PORT:-18789}"
+openclaw gateway stop 2>/dev/null && sleep 2 || true
 pkill -9 -f "openclaw gateway" 2>/dev/null || true
+kill -9 $(pgrep -x openclaw) 2>/dev/null || true
+if command -v fuser &>/dev/null; then
+  fuser -k "$GW_PORT/tcp" 2>/dev/null || true
+elif command -v lsof &>/dev/null; then
+  lsof -t -i:"$GW_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+else
+  ss -tlnp 2>/dev/null | grep ":$GW_PORT" | grep -oP 'pid=\K[0-9]+' | xargs kill -9 2>/dev/null || true
+fi
 sleep 3
 
 # Write gateway startup script to persistent path + symlink to /tmp
@@ -171,14 +181,15 @@ ln -sf "$GW_SCRIPT" /tmp/sg.sh
 if [ "${GW_RUN_CMD:-}" = "direct" ] || ! command -v runuser &>/dev/null || ! id node &>/dev/null 2>&1; then
   "$GW_SCRIPT" &>/tmp/gw.log &
 else
-  runuser -u node -- "$GW_SCRIPT" &>/tmp/gw.log &
+  runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts XDG_DATA_HOME=/root/.openclaw/xdg-data \
+    openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
 fi
 disown
 
 echo "  Waiting for gateway..."
 for i in $(seq 1 25); do
   sleep 2
-  if grep -q "http server listening" /tmp/gw.log 2>/dev/null; then
+  if grep -qE "http server listening|listening on.*:${GW_PORT:-18789}|Gateway.*started|plugins loaded" /tmp/gw.log 2>/dev/null; then
     echo "  Gateway started (${i}x2s)"
     break
   fi
@@ -250,7 +261,10 @@ else
     echo "Gateway patches missing, re-applying..."
     bash "$GIT_ROOT/patch-gateway.sh"
     # Restart gateway to pick up patches
+    openclaw gateway stop 2>/dev/null || true
     pkill -9 -f "openclaw gateway" 2>/dev/null || true
+    kill -9 $(pgrep -x openclaw) 2>/dev/null || true
+    fuser -k 18789/tcp 2>/dev/null || lsof -t -i:18789 2>/dev/null | xargs kill -9 2>/dev/null || true
     sleep 2
     GW_SCRIPT="/root/.openclaw/sg.sh"
     if [ -f "$GW_SCRIPT" ]; then
