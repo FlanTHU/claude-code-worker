@@ -16,8 +16,22 @@ export declare class TopicRegistry {
     getAll(): TopicEntry[];
     getActiveTopics(): TopicEntry[];
     getInactiveTopics(): TopicEntry[];
+    /** Find an unused label derived from base (base, base-2, base-3, …). */
+    private freshLabel;
+    /**
+     * Resolve a label to an entry that is safe to activate.
+     * - No existing entry, or a non-ended entry → return it (create if absent).
+     * - An *ended* entry → do NOT revive in place; create a fresh sibling
+     *   (new label → new sessionKey) so the old gateway context stays detached.
+     */
+    private resolveActivatable;
     getOrCreate(label: string, displayName?: string): TopicEntry;
-    setActive(label: string): void;
+    /**
+     * Activate an existing topic. Returns the activated entry, or undefined if
+     * the label is unknown. If the target is ended, a fresh sibling is created
+     * instead of reviving it (see resolveActivatable).
+     */
+    setActive(label: string): TopicEntry | undefined;
     markInactive(label: string): void;
     markEnded(label: string): void;
     setKeywords(label: string, keywords: string[]): void;

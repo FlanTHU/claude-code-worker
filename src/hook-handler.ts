@@ -349,37 +349,45 @@ export async function handleBeforeDispatch(params: {
 
     case 'continue': {
       if (!result.targetLabel) return undefined;
-      topicLabel = result.targetLabel;
-      registry.getOrCreate(topicLabel);
+      // Use the entry's real label: a target that was ended is not revived in
+      // place — getOrCreate spawns a fresh sibling with a new label/sessionKey.
+      const entry = registry.getOrCreate(result.targetLabel);
+      topicLabel = entry.label;
       break;
     }
 
     case 'switch': {
       if (!result.targetLabel) return undefined;
-      const topic = registry.get(result.targetLabel) ?? registry.findByDisplayName(result.targetLabel);
-      if (!topic) {
+      const found = registry.get(result.targetLabel) ?? registry.findByDisplayName(result.targetLabel);
+      if (!found) {
         log(`Switch target "${result.targetLabel}" not found, passthrough`);
         return undefined;
       }
-      topicLabel = topic.label;
-      registry.setActive(topicLabel);
+      const activated = registry.setActive(found.label);
+      if (!activated) return undefined;
+      topicLabel = activated.label;
       break;
     }
 
     case 'new': {
-      const label = result.targetLabel ?? generateTopicLabel(content);
+      const requestedLabel = result.targetLabel ?? generateTopicLabel(content);
       const fallbackName = deriveDisplayNameFallback(content);
-      topicLabel = label;
+      const activeTopic = registry.getActive();
+
+      // Create first so we use the real label (an ended same-name topic is not
+      // revived — a fresh sibling label/sessionKey is allocated instead).
+      const created = registry.getOrCreate(requestedLabel, fallbackName);
+      topicLabel = created.label;
+      registry.setActive(created.label);
 
       // V4: Soft Fork — carry context from parent topic
-      const activeTopic = registry.getActive();
       if (contextBridge && config.v4?.softFork?.enabled && activeTopic) {
         try {
           const mergeMinutes = config.v4.softFork.mergeWindowMinutes ?? 5;
           const recentMsgs = recentMessagesBySession.get(sessionKey) ?? [];
           const summary = recentMsgs.slice(-5).join(' | ').slice(0, 200);
-          contextBridge.createFork(activeTopic.label, label, summary, mergeMinutes);
-          log(`[v4-soft-fork] Created fork: ${activeTopic.label} → ${label} (merge window ${mergeMinutes}min)`);
+          contextBridge.createFork(activeTopic.label, created.label, summary, mergeMinutes);
+          log(`[v4-soft-fork] Created fork: ${activeTopic.label} → ${created.label} (merge window ${mergeMinutes}min)`);
         } catch (err) {
           log(`[v4-soft-fork] Failed to create fork:`, err);
         }
@@ -387,20 +395,17 @@ export async function handleBeforeDispatch(params: {
 
       // Track for "switch back" hint in output footer
       if (activeTopic) {
-        const newSessionKey = `agent:main:topic:${label}`;
-        recentAutoNewBySession.set(newSessionKey, {
-          newLabel: label,
+        recentAutoNewBySession.set(created.sessionKey, {
+          newLabel: created.label,
           previousLabel: activeTopic.label,
           previousDisplayName: activeTopic.displayName,
           createdAt: Date.now(),
         });
       }
 
-      registry.getOrCreate(label, fallbackName);
-      registry.setActive(label);
       deriveDisplayName(content, classifierLlmConfig, log).then(name => {
         if (name !== fallbackName) {
-          registry.updateDisplayName(label, name);
+          registry.updateDisplayName(created.label, name);
         }
       }).catch(() => {});
       break;

@@ -89,27 +89,47 @@ export class TopicRegistry {
   // Mutate
   // ---------------------------------------------------------------------------
 
-  getOrCreate(label: string, displayName?: string): TopicEntry {
-    const normalized = this.normalizeLabel(label);
-    let entry = this.data.topics[normalized];
-    if (!entry) {
-      entry = {
-        label: normalized,
-        displayName: displayName ?? normalized,
-        sessionKey: `agent:main:topic:${normalized}`,
-        status: 'active',
-        createdAt: Date.now(),
-        lastActiveAt: Date.now(),
-        messageCount: 0,
-        keywords: [],
-      };
-      this.data.topics[normalized] = entry;
-    } else {
-      if (displayName) {
-        entry.displayName = displayName;
-      }
-      entry.status = 'active';
+  /** Find an unused label derived from base (base, base-2, base-3, …). */
+  private freshLabel(base: string): string {
+    if (!this.data.topics[base]) return base;
+    for (let i = 2; i < 10000; i++) {
+      const candidate = `${base}-${i}`;
+      if (!this.data.topics[candidate]) return candidate;
     }
+    return `${base}-${Date.now()}`;
+  }
+
+  /**
+   * Resolve a label to an entry that is safe to activate.
+   * - No existing entry, or a non-ended entry → return it (create if absent).
+   * - An *ended* entry → do NOT revive in place; create a fresh sibling
+   *   (new label → new sessionKey) so the old gateway context stays detached.
+   */
+  private resolveActivatable(label: string, displayName?: string): TopicEntry {
+    const normalized = this.normalizeLabel(label);
+    const existing = this.data.topics[normalized];
+    if (existing && existing.status !== 'ended') {
+      if (displayName) existing.displayName = displayName;
+      return existing;
+    }
+    const freshLabel = existing ? this.freshLabel(normalized) : normalized;
+    const entry: TopicEntry = {
+      label: freshLabel,
+      displayName: displayName ?? existing?.displayName ?? freshLabel,
+      sessionKey: `agent:main:topic:${freshLabel}`,
+      status: 'active',
+      createdAt: Date.now(),
+      lastActiveAt: Date.now(),
+      messageCount: 0,
+      keywords: [],
+    };
+    this.data.topics[freshLabel] = entry;
+    return entry;
+  }
+
+  getOrCreate(label: string, displayName?: string): TopicEntry {
+    const entry = this.resolveActivatable(label, displayName);
+    entry.status = 'active';
     entry.lastActiveAt = Date.now();
     entry.messageCount++;
     this.data.activeSessionKey = entry.sessionKey;
@@ -117,15 +137,24 @@ export class TopicRegistry {
     return entry;
   }
 
-  setActive(label: string): void {
+  /**
+   * Activate an existing topic. Returns the activated entry, or undefined if
+   * the label is unknown. If the target is ended, a fresh sibling is created
+   * instead of reviving it (see resolveActivatable).
+   */
+  setActive(label: string): TopicEntry | undefined {
     const normalized = this.normalizeLabel(label);
     this.reload();
-    const entry = this.data.topics[normalized];
-    if (!entry) return;
+    const existing = this.data.topics[normalized];
+    if (!existing) return undefined;
+
+    const entry = existing.status === 'ended'
+      ? this.resolveActivatable(normalized)
+      : existing;
 
     // Mark ALL other active topics as inactive
     for (const topic of Object.values(this.data.topics)) {
-      if (topic.label !== normalized && topic.status === 'active') {
+      if (topic.label !== entry.label && topic.status === 'active') {
         topic.status = 'inactive';
       }
     }
@@ -134,6 +163,7 @@ export class TopicRegistry {
     entry.lastActiveAt = Date.now();
     this.data.activeSessionKey = entry.sessionKey;
     this.save();
+    return entry;
   }
 
   markInactive(label: string): void {

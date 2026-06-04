@@ -108,6 +108,15 @@ const handleSwitch = async ({ args, registry, log, feedbackStore, contextBridge 
             text: `⚠️ 未找到话题 "${label}"。使用 \`/topics\` 查看所有话题。`,
         };
     }
+    // A manually-named topic that was ended: don't silently open an empty
+    // same-name session — make the user choose, since /switch usually means
+    // "take me back to that context".
+    if (topic.status === 'ended') {
+        return {
+            handled: true,
+            text: `⚠️ 话题 **${topic.displayName}** (${topic.label}) 已结束，无法切回其上下文。\n→ 发送 \`/new ${topic.label}\` 开启同名新话题，或 \`/topics\` 查看现有话题。`,
+        };
+    }
     const currentTopic = registry.getActive();
     // V4: Check for merge-back (soft fork)
     if (contextBridge && currentTopic) {
@@ -149,19 +158,24 @@ const handleSwitch = async ({ args, registry, log, feedbackStore, contextBridge 
             }
         }
     }
-    registry.setActive(label);
-    log(`[topic-router] Switched to topic: ${label}`);
+    // An ended topic is not revived in place; setActive returns the entry that
+    // actually became active (a fresh sibling when the target was ended).
+    const activated = registry.setActive(topic.label) ?? topic;
+    log(`[topic-router] Switched to topic: ${activated.label}`);
     return {
         handled: true,
-        text: `✅ 已切换到话题 **${topic.displayName}** (${topic.label})\n\nSession: \`${topic.sessionKey}\`\n历史消息: ${topic.messageCount}条`,
+        text: `✅ 已切换到话题 **${activated.displayName}** (${activated.label})\n\nSession: \`${activated.sessionKey}\`\n历史消息: ${activated.messageCount}条`,
     };
 };
 // ---------------------------------------------------------------------------
 // /new — Create a new topic
 // ---------------------------------------------------------------------------
 const handleNew = async ({ args, registry, log, feedbackStore }) => {
-    const label = args.trim() || `topic-${Date.now().toString(36)}`;
-    const topic = registry.getOrCreate(label, label);
+    const requestedLabel = args.trim() || `topic-${Date.now().toString(36)}`;
+    // getOrCreate returns the real entry: if a same-name topic was ended, a fresh
+    // sibling (new label/sessionKey) is created instead of reviving it.
+    const topic = registry.getOrCreate(requestedLabel, requestedLabel);
+    const label = topic.label;
     topic.keywords = [];
     // V4: Emit feedback if system should have auto-created
     if (feedbackStore) {
@@ -202,7 +216,7 @@ const handleEnd = async ({ args, registry, log }) => {
         log(`[topic-router] Ended all ${all.length} topics`);
         return {
             handled: true,
-            text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
+            text: `✅ 已归档全部 ${all.length} 个话题，从列表移除。后续消息会开启全新话题，不会再接续这些话题的上下文。\n（历史对话仍由网关保留，如需彻底删除请另行清理。）`,
         };
     }
     const target = label || registry.getActive()?.label;
@@ -234,7 +248,7 @@ const handleEndAll = async ({ registry, log }) => {
     log(`[topic-router] Ended all ${all.length} topics`);
     return {
         handled: true,
-        text: `✅ 已清理全部 ${all.length} 个话题。后续消息将创建新话题。`,
+        text: `✅ 已归档全部 ${all.length} 个话题，从列表移除。后续消息会开启全新话题，不会再接续这些话题的上下文。\n（历史对话仍由网关保留，如需彻底删除请另行清理。）`,
     };
 };
 const COMMANDS = {

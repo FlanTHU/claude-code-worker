@@ -167,6 +167,11 @@ export default definePluginEntry({
           return { text: `⚠️ 未找到话题 "${label}"。使用 \`/topics\` 查看所有话题。` };
         }
 
+        // Ended topic: don't silently open an empty same-name session.
+        if (topic.status === 'ended') {
+          return { text: `⚠️ 话题 **${topic.displayName}** (${topic.label}) 已结束，无法切回其上下文。\n→ 发送 \`/new ${topic.label}\` 开启同名新话题，或 \`/topics\` 查看现有话题。` };
+        }
+
         const currentTopic = registry.getActive();
 
         // V4: Soft Fork merge-back
@@ -206,11 +211,12 @@ export default definePluginEntry({
           }
         }
 
-        registry.setActive(label);
-        cmdLog(`Switched to topic: ${label}`);
+        // Ended topics are not revived in place; use the entry that became active.
+        const activated = registry.setActive(topic.label) ?? topic;
+        cmdLog(`Switched to topic: ${activated.label}`);
 
         return {
-          text: `✅ 已切换到话题 **${topic.displayName}** (${topic.label})\n\nSession: \`${topic.sessionKey}\`\n历史消息: ${topic.messageCount}条`,
+          text: `✅ 已切换到话题 **${activated.displayName}** (${activated.label})\n\nSession: \`${activated.sessionKey}\`\n历史消息: ${activated.messageCount}条`,
         };
       },
     });
