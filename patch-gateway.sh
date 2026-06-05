@@ -37,36 +37,59 @@ for old, new in [
     if old in content:
         content = content.replace(old, new, 1)
 
-# Insert routing code after the before_dispatch block closes, before reply_dispatch
+# Insert routing code INSIDE the before_dispatch block, so that the
+# block-scoped `const beforeDispatchResult` is still in scope.
+#
+# CRITICAL: `beforeDispatchResult` is declared with `const` inside
+#   if (hookRunner?.hasHooks(\"before_dispatch\")) { ... }
+# Inserting the routing code AFTER that block's closing brace puts it out
+# of scope -> runtime `ReferenceError: beforeDispatchResult is not defined`.
+# We therefore anchor on the END of the `if (beforeDispatchResult?.handled)`
+# branch and insert immediately after it -- still inside the outer block.
 lines = content.split('\n')
 insert_idx = -1
 
-# Strategy 1: find closing of 'if (hookRunner?.hasHooks(\"before_dispatch\"))' block
-# by locating 'reply_dispatch' hook check that follows it
+# Anchor: the handled branch ends with
+#   recordProcessed(... 'before_dispatch_handled' ...)
+#   ...
+#   return attachSourceReplyDeliveryMode({ queuedFinal, counts });
+#   }            <- closes `if (beforeDispatchResult?.handled)`  (insert AFTER this)
+found_handled = False
 for i, line in enumerate(lines):
-    if 'reply_dispatch' in line and 'hasHooks' in line:
-        insert_idx = i
+    if 'before_dispatch_handled' in line and 'recordProcessed' in line:
+        found_handled = True
+        continue
+    if found_handled and 'return attachSourceReplyDeliveryMode' in line:
+        # find the closing brace of the handled branch (next standalone '}')
+        for j in range(i + 1, min(i + 12, len(lines))):
+            if lines[j].strip() == '}':
+                insert_idx = j + 1
+                break
         break
 
-# Strategy 2 (older gateway): find 'return attachSourceReplyDeliveryMode' after handled block
 if insert_idx == -1:
-    found_marker = False
-    for i, line in enumerate(lines):
-        if 'before_dispatch_handled' in line and 'recordProcessed' in line:
-            found_marker = True
-            continue
-        if found_marker and 'return attachSourceReplyDeliveryMode' in line:
-            for j in range(i + 1, min(i + 10, len(lines))):
-                if lines[j].strip() == '}':
-                    insert_idx = j + 1
-                    break
-            break
-
-if insert_idx == -1:
-    print('ERROR: Could not find insertion point in dispatch')
+    print('ERROR: Could not find in-scope insertion point in dispatch')
+    print('       (expected handled-branch ending in attachSourceReplyDeliveryMode)')
     sys.exit(1)
 
-indent = '\t\t\t\t'
+# Scope guard: the very next non-blank line after our insertion point must be
+# the closing brace of the before_dispatch block (i.e. we are still INSIDE it).
+# If the next meaningful token is `if (hookRunner?.hasHooks(\"reply_dispatch\"))`
+# without an intervening `}`, we'd be out of scope -> refuse to patch.
+k = insert_idx
+while k < len(lines) and lines[k].strip() == '':
+    k += 1
+if k < len(lines) and 'reply_dispatch' in lines[k] and 'hasHooks' in lines[k]:
+    print('ERROR: insertion point is OUTSIDE the before_dispatch block (out of scope)')
+    print('       refusing to patch -- would cause ReferenceError at runtime')
+    sys.exit(1)
+
+# Derive indent from the closing brace of the handled branch so the inserted
+# code lines up with the surrounding block regardless of gateway formatting.
+anchor_line = lines[insert_idx - 1]
+indent = anchor_line[:len(anchor_line) - len(anchor_line.lstrip())]
+if not indent:
+    indent = '\t\t\t\t'
 routing_code = (
     f'{indent}if (beforeDispatchResult?.sessionKey && beforeDispatchResult.sessionKey !== acpDispatchSessionKey) {{\n'
     f'{indent}\tacpDispatchSessionKey = beforeDispatchResult.sessionKey;\n'
@@ -89,6 +112,14 @@ with open(dispatch_file, 'w') as f:
     f.write('\n'.join(lines))
 print('  ✓ Dispatch patched')
 "
+  # Syntax-check the patched dispatch file; restore backup on failure.
+  if ! node -c "$DISPATCH_FILE" 2>/tmp/dispatch-syntax.err; then
+    echo "  ✗ Patched dispatch failed syntax check — restoring backup:"
+    sed 's/^/      /' /tmp/dispatch-syntax.err
+    cp "${DISPATCH_FILE}.bak" "$DISPATCH_FILE"
+    exit 1
+  fi
+  echo "  ✓ Dispatch syntax OK"
 fi
 
 # --- Patch 2: hook-runner (allow sessionKey passthrough when handled=false) ---
