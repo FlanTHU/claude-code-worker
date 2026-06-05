@@ -16,10 +16,69 @@ fi
 
 echo "[1/2] Patching dispatch: $DISPATCH_FILE"
 
-if grep -q "session re-routed to" "$DISPATCH_FILE" 2>/dev/null; then
-  echo "  Already patched. Skipping."
+# Decide whether we need to (re)patch. A previous buggy patch may have inserted
+# the routing block OUTSIDE the before_dispatch block (out of scope for the
+# const-declared beforeDispatchResult). In that case we must NOT skip: we strip
+# the misplaced block and re-apply correctly.
+DISPATCH_STATE=$(python3 -c "
+import sys
+content = open('$DISPATCH_FILE').read()
+lines = content.split('\n')
+if 'session re-routed to' not in content:
+    print('UNPATCHED'); sys.exit(0)
+# Routing block start line.
+ri = next((i for i, l in enumerate(lines)
+           if 'beforeDispatchResult?.sessionKey' in l and 'acpDispatchSessionKey' in l), -1)
+if ri == -1:
+    print('UNPATCHED'); sys.exit(0)
+# before_dispatch hasHooks line.
+bd = next((i for i, l in enumerate(lines)
+           if 'before_dispatch' in l and 'hasHooks' in l), -1)
+if bd == -1:
+    print('MISPLACED'); sys.exit(0)
+# Brace-balance from the before_dispatch hasHooks line to find where its block
+# closes. The routing block is in scope iff it starts BEFORE that closing brace.
+depth = 0; started = False; close_idx = -1
+for i in range(bd, len(lines)):
+    depth += lines[i].count('{') - lines[i].count('}')
+    if lines[i].count('{') > 0:
+        started = True
+    if started and depth <= 0:
+        close_idx = i; break
+print('OK' if (close_idx != -1 and ri < close_idx) else 'MISPLACED')
+")
+echo "  Dispatch patch state: $DISPATCH_STATE"
+
+if [ "$DISPATCH_STATE" = "OK" ]; then
+  echo "  Already patched correctly. Skipping."
 else
   cp "$DISPATCH_FILE" "${DISPATCH_FILE}.bak"
+
+  # If a misplaced routing block exists, strip it before re-applying.
+  if [ "$DISPATCH_STATE" = "MISPLACED" ]; then
+    echo "  Detected MISPLACED routing block (out of scope) — removing before re-apply."
+    python3 -c "
+dispatch_file = '$DISPATCH_FILE'
+lines = open(dispatch_file).read().split('\n')
+start = next((i for i, l in enumerate(lines)
+              if 'beforeDispatchResult?.sessionKey' in l and 'acpDispatchSessionKey' in l), -1)
+if start != -1:
+    end = -1
+    for j in range(start + 1, len(lines)):
+        if 're-routed to' in lines[j]:
+            for k in range(j + 1, min(j + 4, len(lines))):
+                if lines[k].strip() == '}':
+                    end = k; break
+            break
+    if end != -1:
+        del lines[start:end + 1]
+        open(dispatch_file, 'w').write('\n'.join(lines))
+        print('  ✓ Removed misplaced block')
+    else:
+        print('  ⚠ Could not bound misplaced block; aborting'); raise SystemExit(1)
+"
+  fi
+
   python3 -c "
 import sys
 
