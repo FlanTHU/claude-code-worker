@@ -1,6 +1,14 @@
 #!/bin/bash
 # Patch gateway for before_dispatch sessionKey routing support.
 # Run inside the container: bash /tmp/patch-gateway.sh
+#
+# CONTRACT: the marker substring "re-routed to" is shared across 4 sites and
+# MUST stay in sync if the injected log line is ever reworded:
+#   1. DISPATCH_STATE detection      ('session re-routed to' present-check)
+#   2. MISPLACED strip bounding      ('re-routed to' end-of-block locator)
+#   3. injected routing code         (the console.log emitted into dispatch)
+#   4. final verification grep       ('session re-routed' presence check)
+# Change one -> change all four, or detection/strip/verify will silently fail.
 set -e
 
 echo "=== Gateway Session Routing Patch ==="
