@@ -90,7 +90,10 @@ async function extractKeywords(
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  // mimo is a reasoning model: naming/keyword calls routinely take ~10s, so an
+  // 8s timeout aborted every request → silent fallback. Async fire-and-forget,
+  // doesn't block the user reply, so a generous 20s is safe.
+  const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -171,7 +174,10 @@ async function deriveDisplayName(
   };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  // mimo is a reasoning model: naming/keyword calls routinely take ~10s, so an
+  // 8s timeout aborted every request → silent fallback. Async fire-and-forget,
+  // doesn't block the user reply, so a generous 20s is safe.
+  const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -209,8 +215,11 @@ async function deriveDisplayName(
       log(`[hook-handler] Generated display name: "${answer}" (from ${from})`);
       return answer;
     }
+    log(`[hook-handler] Display name rejected (len ${answer.length}), using fallback "${fallback}"`);
     return fallback;
-  } catch {
+  } catch (err) {
+    // Surface why naming fell back (e.g. AbortError on timeout) instead of silently截断.
+    log(`[hook-handler] deriveDisplayName failed (${(err as Error)?.name ?? err}), using fallback "${fallback}"`);
     return fallback;
   } finally {
     clearTimeout(timer);
