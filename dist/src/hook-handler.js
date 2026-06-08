@@ -101,9 +101,32 @@ async function extractKeywords(content, existingKeywords, llmConfig, log) {
         clearTimeout(timer);
     }
 }
+// Strip leading filler/politeness so the truncated fallback name starts at the
+// real subject. Without this, "帮我查一下星巴克的热量" truncates to "帮我查一下星巴…"
+// — all filler, no signal. Only a leading run of these prefixes is peeled.
+const FALLBACK_FILLER_PREFIXES = [
+    '帮我查一下', '帮我查查', '帮我查', '帮我看一下', '帮我看看', '帮我搜一下',
+    '帮我搜', '帮我找一下', '帮我找', '帮忙查一下', '帮忙', '帮我', '请帮我',
+    '请问一下', '请问', '我想问一下', '我想问', '想问一下', '我想知道', '想知道',
+    '我想了解', '想了解', '麻烦', '请', '查一下', '查查', '看一下', '搜一下',
+];
 function deriveDisplayNameFallback(content) {
-    const trimmed = content.trim().replace(/\s+/g, ' ');
-    const maxLen = 8;
+    let trimmed = content.trim().replace(/\s+/g, ' ');
+    // Peel leading filler prefixes (repeatedly, e.g. "请帮我查一下…").
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const p of FALLBACK_FILLER_PREFIXES) {
+            if (trimmed.startsWith(p) && trimmed.length > p.length) {
+                trimmed = trimmed.slice(p.length).trim();
+                changed = true;
+                break;
+            }
+        }
+    }
+    // Tighten to 6 chars to match the LLM namer's "2-6 字" target, so the fallback
+    // reads like a real short title rather than a clipped sentence.
+    const maxLen = 6;
     if (trimmed.length <= maxLen)
         return trimmed;
     return trimmed.slice(0, maxLen) + '…';
