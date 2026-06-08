@@ -370,6 +370,16 @@ export async function classify(
     const trimmedForCheck = content.trim();
     const isSubstantial = (trimmedForCheck.length > 6 && /[？?。！!]/.test(trimmedForCheck)) || trimmedForCheck.length > 15;
 
+    // Recently-active guard: if the active topic was touched very recently (e.g. the
+    // user just `/switch`ed back into it, or is mid-conversation), the next message is
+    // a continuation — DON'T auto-new even on zero keyword overlap. Without this, a
+    // manual /switch followed by an unrelated-looking follow-up gets bounced into a new
+    // topic again, and switching back loops forever. User intent (recent activity /
+    // explicit switch) outranks keyword-overlap guessing. Saturation (Rule A) is
+    // unaffected — it requires idle ≥10min, mutually exclusive with "recent".
+    const RECENT_ACTIVE_WINDOW = 3 * 60 * 1000; // 3 minutes
+    const recentlyActive = idleMs < RECENT_ACTIVE_WINDOW;
+
     // Rule A: Saturation — topic has many messages + idle for a while + unrelated.
     // V4: thresholds come from feedback-store adaptive values when present, else defaults.
     const adaptive = config._adaptiveThresholds;
@@ -390,7 +400,7 @@ export async function classify(
     // "天气" topic) must NOT block creating a new topic for an unrelated message.
     const activeTopics = allTopics.filter(t => t.status !== 'ended');
     const KEYWORD_MATURITY = 5;
-    if (activeTopic.keywords.length >= KEYWORD_MATURITY && !hasKeywordOverlap && isSubstantial) {
+    if (activeTopic.keywords.length >= KEYWORD_MATURITY && !hasKeywordOverlap && isSubstantial && !recentlyActive) {
       const anyActiveOverlap = activeTopics.some(t =>
         t.label !== activeTopic!.label &&
         t.keywords.length > 0 &&
@@ -411,7 +421,7 @@ export async function classify(
     // topic → likely a new topic. Catches the gap Rule B misses (low-maturity active
     // topic with <5 keywords, e.g. a fresh topic). Threshold raised from the original
     // draft's 4 to 8 to avoid trivial fillers ("好的"/"继续") spawning topics.
-    if (activeTopic.keywords.length > 0 && !hasKeywordOverlap && content.trim().length >= 8) {
+    if (activeTopic.keywords.length > 0 && !hasKeywordOverlap && content.trim().length >= 8 && !recentlyActive) {
       const anyActiveOverlap = activeTopics.some(t =>
         t.label !== activeTopic!.label &&
         t.keywords.length > 0 &&
