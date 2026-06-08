@@ -83,6 +83,41 @@ if [ "$PASS" = false ]; then
 fi
 
 echo ""
+echo "=== Step 3.5: Unify load path (use bundled /app/dist, drop stray overrides) ==="
+# The gateway must load topic-router from the bundled /app/dist copy that this
+# script deploys. Stray global-plugin copies under ~/.openclaw/{plugins,extensions}
+# (e.g. an `openclaw plugins install --link` override) take precedence and would
+# shadow this deploy — so remove them and strip their entry from plugins.load.paths.
+# This matches bootstrap.sh's design (it also rm -rf these paths).
+for stray in /root/.openclaw/plugins/topic-router /root/.openclaw/extensions/topic-router; do
+  if [ -e "$stray" ]; then
+    mkdir -p /root/.openclaw/_archive
+    mv "$stray" "/root/.openclaw/_archive/$(basename "$stray").$(date +%Y%m%d-%H%M%S)" 2>/dev/null \
+      && echo "  Archived stray copy: $stray" \
+      || { rm -rf "$stray" && echo "  Removed stray copy: $stray"; }
+  fi
+done
+OCJSON="/root/.openclaw/openclaw.json"
+if [ -f "$OCJSON" ]; then
+  python3 -c "
+import json
+p = '$OCJSON'
+cfg = json.load(open(p))
+paths = cfg.get('plugins', {}).get('load', {}).get('paths')
+if isinstance(paths, list):
+    kept = [x for x in paths if 'topic-router' not in str(x)]
+    if kept != paths:
+        cfg['plugins']['load']['paths'] = kept
+        json.dump(cfg, open(p, 'w'), indent=2, ensure_ascii=False)
+        print('  Removed topic-router from plugins.load.paths')
+    else:
+        print('  plugins.load.paths already clean')
+else:
+    print('  No plugins.load.paths to clean')
+" 2>/dev/null || echo "  (load.paths cleanup skipped)"
+fi
+
+echo ""
 echo "=== Step 4: Restart gateway ==="
 GW_PORT="${GW_PORT:-18789}"
 

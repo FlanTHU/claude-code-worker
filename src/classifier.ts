@@ -310,6 +310,11 @@ export async function classify(
   const cmd = parseExplicitCommand(content);
   if (cmd) return cmd;
 
+  // V4: Override confidenceThreshold with feedback-store adaptive value if present.
+  const effectiveConfig = config._adaptiveThresholds?.confidenceThreshold
+    ? { ...config, classifier: { ...config.classifier, confidenceThreshold: config._adaptiveThresholds.confidenceThreshold } }
+    : config;
+
   // No topics exist → auto-create first topic for substantial messages
   if (allTopics.length === 0) {
     const trimmedContent = content.trim();
@@ -334,13 +339,13 @@ export async function classify(
 
   // Strong keyword match (2+ keywords hit)
   const keywordResult = matchKeywords(content, allTopics);
-  if (keywordResult && keywordResult.confidence >= config.classifier.confidenceThreshold) {
+  if (keywordResult && keywordResult.confidence >= effectiveConfig.classifier.confidenceThreshold) {
     return keywordResult;
   }
 
   // Continuation signals / short messages
   const continuationResult = detectContinuation(content, recentMessages, activeTopic);
-  if (continuationResult && continuationResult.confidence >= config.classifier.confidenceThreshold) {
+  if (continuationResult && continuationResult.confidence >= effectiveConfig.classifier.confidenceThreshold) {
     return continuationResult;
   }
 
@@ -353,9 +358,11 @@ export async function classify(
     const trimmedForCheck = content.trim();
     const isSubstantial = (trimmedForCheck.length > 6 && /[？?。！!]/.test(trimmedForCheck)) || trimmedForCheck.length > 15;
 
-    // Rule A: Saturation — topic has many messages + idle for a while + unrelated
-    const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-    const MSG_THRESHOLD = 3;
+    // Rule A: Saturation — topic has many messages + idle for a while + unrelated.
+    // V4: thresholds come from feedback-store adaptive values when present, else defaults.
+    const adaptive = config._adaptiveThresholds;
+    const IDLE_THRESHOLD = (adaptive?.saturationIdleMinutes ?? 10) * 60 * 1000;
+    const MSG_THRESHOLD = adaptive?.saturationMessageCount ?? 5;
     if (activeTopic.messageCount >= MSG_THRESHOLD && idleMs >= IDLE_THRESHOLD && !hasKeywordOverlap && isSubstantial) {
       _log(`[classifier] Auto-new (saturation): msgs=${activeTopic.messageCount}, idle=${Math.round(idleMs / 60000)}min`);
       return {
@@ -366,22 +373,45 @@ export async function classify(
       };
     }
 
-    // Rule B: Zero overlap — topic has enough keywords to judge relevance, message is clearly unrelated
+    // Rule B: Zero overlap — topic has enough keywords to judge relevance, message is clearly unrelated.
+    // Only consider ACTIVE topics for overlap: an ended topic's keywords (e.g. a closed
+    // "天气" topic) must NOT block creating a new topic for an unrelated message.
+    const activeTopics = allTopics.filter(t => t.status !== 'ended');
     const KEYWORD_MATURITY = 5;
     if (activeTopic.keywords.length >= KEYWORD_MATURITY && !hasKeywordOverlap && isSubstantial) {
-      // Also check no overlap with ANY other topic (truly new subject)
-      const anyOtherOverlap = allTopics.some(t =>
+      const anyActiveOverlap = activeTopics.some(t =>
         t.label !== activeTopic!.label &&
         t.keywords.length > 0 &&
         t.keywords.some(kw => msgLower.includes(kw.toLowerCase()))
       );
-      if (!anyOtherOverlap) {
-        _log(`[classifier] Auto-new (zero-overlap): ${activeTopic.keywords.length} keywords, 0 hits, substantial msg`);
+      if (!anyActiveOverlap) {
+        _log(`[classifier] Auto-new (zero-overlap): active="${activeTopic.label}" ${activeTopic.keywords.length} keywords, 0 hits with any active topic`);
         return {
           action: 'new',
           targetLabel: null,
-          confidence: 0.6,
-          reason: `No keyword overlap with any topic (active has ${activeTopic.keywords.length} keywords) + substantial message`,
+          confidence: 0.7,
+          reason: `No keyword overlap with any active topic (active has ${activeTopic.keywords.length} keywords) + substantial message`,
+        };
+      }
+    }
+
+    // Rule B-short: unrelated message (≥8 chars) with zero overlap against any active
+    // topic → likely a new topic. Catches the gap Rule B misses (low-maturity active
+    // topic with <5 keywords, e.g. a fresh topic). Threshold raised from the original
+    // draft's 4 to 8 to avoid trivial fillers ("好的"/"继续") spawning topics.
+    if (activeTopic.keywords.length > 0 && !hasKeywordOverlap && content.trim().length >= 8) {
+      const anyActiveOverlap = activeTopics.some(t =>
+        t.label !== activeTopic!.label &&
+        t.keywords.length > 0 &&
+        t.keywords.some(kw => msgLower.includes(kw.toLowerCase()))
+      );
+      if (!anyActiveOverlap) {
+        _log(`[classifier] Auto-new (short zero-overlap): msg="${content.slice(0, 30)}" vs active="${activeTopic.label}"`);
+        return {
+          action: 'new',
+          targetLabel: null,
+          confidence: 0.65,
+          reason: `Short message with zero keyword overlap on active topic "${activeTopic.label}"`,
         };
       }
     }

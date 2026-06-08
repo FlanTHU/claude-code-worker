@@ -227,7 +227,12 @@ export async function handleBeforeDispatch(params) {
         log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}" (action=${result.action})`);
     }
     else {
-        result = await classify(content, recentMessages, registry, config, classifierLlmConfig, log);
+        // V4: inject feedback-store adaptive thresholds so the classifier uses
+        // feedback-driven values (confidence / saturation) instead of hardcoded defaults.
+        const classifyConfig = (feedbackStore && config.v4?.feedback?.enabled)
+            ? { ...config, _adaptiveThresholds: feedbackStore.getThresholds() }
+            : config;
+        result = await classify(content, recentMessages, registry, classifyConfig, classifierLlmConfig, log);
     }
     log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
     // ── V4: UI Strategy ──

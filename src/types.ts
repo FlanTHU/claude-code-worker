@@ -45,6 +45,12 @@ export interface TopicRouterConfig {
   replyFooter: boolean;
   targetSessionKey: string;
   v4?: V4Config;
+  /**
+   * Runtime-injected adaptive thresholds from the feedback-store (set by
+   * hook-handler before each classify() call). Not persisted config — lets the
+   * classifier use feedback-driven values instead of hardcoded defaults.
+   */
+  _adaptiveThresholds?: AdaptiveThresholds;
 }
 
 export interface HookEvent {
