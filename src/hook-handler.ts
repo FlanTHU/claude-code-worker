@@ -443,15 +443,25 @@ export async function handleBeforeDispatch(params: {
   if (!topicLabel) return undefined;
 
   // ── Learn keywords: rule-based instant + LLM async refinement ──
-  registry.learnKeywords(topicLabel, content);
+  // Skip learning on low-confidence sticky "continue": those are weak fallbacks,
+  // not real topic matches. Learning from them pollutes the topic with unrelated
+  // keywords (e.g. a weather question's "北京/晚上/打球" written into an end-of-day
+  // 端午 topic), which then makes every later message falsely stick — a snowball.
+  const isWeakStickyContinue = result.action === 'continue'
+    && (result.confidence < 0.65 || /sticky/i.test(result.reason));
+  if (!isWeakStickyContinue) {
+    registry.learnKeywords(topicLabel, content);
 
-  const existingTopic = registry.get(topicLabel);
-  const existingKw = existingTopic?.keywords ?? [];
-  extractKeywords(content, existingKw, classifierLlmConfig, log).then(keywords => {
-    if (keywords.length > 0) {
-      registry.setKeywords(topicLabel!, keywords);
-    }
-  }).catch(() => {});
+    const existingTopic = registry.get(topicLabel);
+    const existingKw = existingTopic?.keywords ?? [];
+    extractKeywords(content, existingKw, classifierLlmConfig, log).then(keywords => {
+      if (keywords.length > 0) {
+        registry.setKeywords(topicLabel!, keywords);
+      }
+    }).catch(() => {});
+  } else {
+    log(`[hook-handler] Skip keyword learning (weak sticky continue, conf=${result.confidence})`);
+  }
 
   // ── Session routing via before_dispatch sessionKey field ──
   const topic = registry.get(topicLabel);

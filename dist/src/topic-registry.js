@@ -7,12 +7,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 const REGISTRY_FILE = 'topic-sessions.json';
-const STOPWORDS = new Set([
+export const STOPWORDS = new Set([
     // Chinese high-frequency function words that cause false matches
     '怎么', '什么', '这个', '那个', '为什么', '怎么样', '是什么',
     '这是', '那是', '可以', '不能', '已经', '还是', '或者',
     '如何', '哪个', '哪些', '这些', '那些', '一下', '一些',
     '但是', '因为', '所以', '如果', '虽然', '不过',
+    // High-frequency place/time words: these recur across unrelated topics
+    // (a weather, a sports, a travel question all mention 北京/晚上/本周), so using
+    // them as topic keywords causes false cross-topic substring matches. They must
+    // NOT decide topic membership. (Note: specific terms like 端午节 stay valid.)
+    '北京', '上海', '广州', '深圳', '今天', '明天', '后天', '昨天',
+    '本周', '这周', '上周', '下周', '周一', '周二', '周三', '周四',
+    '周五', '周六', '周日', '周末', '早上', '上午', '中午', '下午',
+    '晚上', '今晚', '现在', '目前', '最近', '适合',
     // English common words
     'this', 'that', 'what', 'which', 'have', 'been', 'with',
     'from', 'they', 'will', 'would', 'could', 'should',
@@ -199,16 +207,13 @@ export class TopicRegistry {
             // Split on break characters (particles, conjunctions)
             const parts = this.splitOnBreakChars(raw);
             for (const seg of parts) {
+                // Only keep clean 2-4 char word-level units. Previously long segments
+                // were sliced into overlapping bigrams ("本周四北","四北京晚"…), which are
+                // meaningless fragments that (a) pollute the topic and (b) match unrelated
+                // messages via substring `includes`. Dropping them: rely on the LLM keyword
+                // extractor (extractKeywords) for long/complex content instead.
                 if (seg.length >= 2 && seg.length <= 4) {
                     words.push(seg);
-                }
-                else if (seg.length > 4) {
-                    // Sliding window: extract 2-char bigrams with overlap for long segments
-                    for (let i = 0; i <= seg.length - 2; i += 2) {
-                        const chunk = seg.slice(i, i + Math.min(4, seg.length - i));
-                        if (chunk.length >= 2)
-                            words.push(chunk);
-                    }
                 }
             }
         }

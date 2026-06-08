@@ -9,7 +9,19 @@
 
 import type { ClassifyResult, TopicEntry, TopicRouterConfig, AdaptiveThresholds, UIStrategy } from './types.js';
 import type { TopicRegistry } from './topic-registry.js';
+import { STOPWORDS } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
+
+/**
+ * Does message `msg` (already lowercased) overlap topic keyword `kw`?
+ * A keyword counts only if it's NOT a high-frequency stop/place/time word —
+ * those (北京/晚上/本周…) recur across unrelated topics and cause false sticking.
+ */
+function kwHit(kw: string, msg: string): boolean {
+  const k = kw.toLowerCase();
+  if (STOPWORDS.has(k)) return false;
+  return msg.includes(k);
+}
 
 export interface ClassifyOptions {
   content: string;
@@ -66,7 +78,7 @@ export function matchKeywords(
     if (topic.keywords.length === 0) continue;
 
     const matchedCount = topic.keywords.filter(kw =>
-      normalized.includes(kw.toLowerCase())
+      kwHit(kw, normalized)
     ).length;
 
     if (matchedCount < MIN_KEYWORD_MATCHES) continue;
@@ -354,7 +366,7 @@ export async function classify(
     const idleMs = Date.now() - activeTopic.lastActiveAt;
     const msgLower = content.toLowerCase();
     const hasKeywordOverlap = activeTopic.keywords.length > 0 &&
-      activeTopic.keywords.some(kw => msgLower.includes(kw.toLowerCase()));
+      activeTopic.keywords.some(kw => kwHit(kw, msgLower));
     const trimmedForCheck = content.trim();
     const isSubstantial = (trimmedForCheck.length > 6 && /[？?。！!]/.test(trimmedForCheck)) || trimmedForCheck.length > 15;
 
@@ -382,7 +394,7 @@ export async function classify(
       const anyActiveOverlap = activeTopics.some(t =>
         t.label !== activeTopic!.label &&
         t.keywords.length > 0 &&
-        t.keywords.some(kw => msgLower.includes(kw.toLowerCase()))
+        t.keywords.some(kw => kwHit(kw, msgLower))
       );
       if (!anyActiveOverlap) {
         _log(`[classifier] Auto-new (zero-overlap): active="${activeTopic.label}" ${activeTopic.keywords.length} keywords, 0 hits with any active topic`);
@@ -403,7 +415,7 @@ export async function classify(
       const anyActiveOverlap = activeTopics.some(t =>
         t.label !== activeTopic!.label &&
         t.keywords.length > 0 &&
-        t.keywords.some(kw => msgLower.includes(kw.toLowerCase()))
+        t.keywords.some(kw => kwHit(kw, msgLower))
       );
       if (!anyActiveOverlap) {
         _log(`[classifier] Auto-new (short zero-overlap): msg="${content.slice(0, 30)}" vs active="${activeTopic.label}"`);
@@ -439,7 +451,7 @@ export async function classify(
 
     const msgLower = content.toLowerCase();
     const overlapCount = activeTopic.keywords.length > 0
-      ? activeTopic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length
+      ? activeTopic.keywords.filter(kw => kwHit(kw, msgLower)).length
       : 0;
 
     if (overlapCount >= 1) {
@@ -457,7 +469,7 @@ export async function classify(
     for (const topic of allTopics) {
       if (topic.label === activeTopic.label) continue;
       if (topic.keywords.length === 0) continue;
-      const hits = topic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length;
+      const hits = topic.keywords.filter(kw => kwHit(kw, msgLower)).length;
       if (hits >= 2 && hits > bestOtherHits) {
         bestOtherHits = hits;
         bestOtherTopic = topic;

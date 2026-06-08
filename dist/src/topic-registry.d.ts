@@ -5,6 +5,7 @@
  * Each topic maps to an isolated session key (agent:main:topic:{label}).
  */
 import type { TopicEntry } from './types.js';
+export declare const STOPWORDS: Set<string>;
 export declare class TopicRegistry {
     private data;
     private filePath;

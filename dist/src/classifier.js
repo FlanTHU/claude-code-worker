@@ -6,6 +6,18 @@
  *   L1: High-confidence rules (keyword 2+, continuation signals, short messages)
  *   L2: LLM fallback for ambiguous cases
  */
+import { STOPWORDS } from './topic-registry.js';
+/**
+ * Does message `msg` (already lowercased) overlap topic keyword `kw`?
+ * A keyword counts only if it's NOT a high-frequency stop/place/time word —
+ * those (北京/晚上/本周…) recur across unrelated topics and cause false sticking.
+ */
+function kwHit(kw, msg) {
+    const k = kw.toLowerCase();
+    if (STOPWORDS.has(k))
+        return false;
+    return msg.includes(k);
+}
 // ---------------------------------------------------------------------------
 // L0: Explicit command detection
 // ---------------------------------------------------------------------------
@@ -42,7 +54,7 @@ export function matchKeywords(content, topics) {
     for (const topic of topics) {
         if (topic.keywords.length === 0)
             continue;
-        const matchedCount = topic.keywords.filter(kw => normalized.includes(kw.toLowerCase())).length;
+        const matchedCount = topic.keywords.filter(kw => kwHit(kw, normalized)).length;
         if (matchedCount < MIN_KEYWORD_MATCHES)
             continue;
         const ratio = matchedCount / Math.max(topic.keywords.length, 1);
@@ -276,7 +288,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
         const idleMs = Date.now() - activeTopic.lastActiveAt;
         const msgLower = content.toLowerCase();
         const hasKeywordOverlap = activeTopic.keywords.length > 0 &&
-            activeTopic.keywords.some(kw => msgLower.includes(kw.toLowerCase()));
+            activeTopic.keywords.some(kw => kwHit(kw, msgLower));
         const trimmedForCheck = content.trim();
         const isSubstantial = (trimmedForCheck.length > 6 && /[？?。！!]/.test(trimmedForCheck)) || trimmedForCheck.length > 15;
         // Rule A: Saturation — topic has many messages + idle for a while + unrelated.
@@ -301,7 +313,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
         if (activeTopic.keywords.length >= KEYWORD_MATURITY && !hasKeywordOverlap && isSubstantial) {
             const anyActiveOverlap = activeTopics.some(t => t.label !== activeTopic.label &&
                 t.keywords.length > 0 &&
-                t.keywords.some(kw => msgLower.includes(kw.toLowerCase())));
+                t.keywords.some(kw => kwHit(kw, msgLower)));
             if (!anyActiveOverlap) {
                 _log(`[classifier] Auto-new (zero-overlap): active="${activeTopic.label}" ${activeTopic.keywords.length} keywords, 0 hits with any active topic`);
                 return {
@@ -319,7 +331,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
         if (activeTopic.keywords.length > 0 && !hasKeywordOverlap && content.trim().length >= 8) {
             const anyActiveOverlap = activeTopics.some(t => t.label !== activeTopic.label &&
                 t.keywords.length > 0 &&
-                t.keywords.some(kw => msgLower.includes(kw.toLowerCase())));
+                t.keywords.some(kw => kwHit(kw, msgLower)));
             if (!anyActiveOverlap) {
                 _log(`[classifier] Auto-new (short zero-overlap): msg="${content.slice(0, 30)}" vs active="${activeTopic.label}"`);
                 return {
@@ -350,7 +362,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
         }
         const msgLower = content.toLowerCase();
         const overlapCount = activeTopic.keywords.length > 0
-            ? activeTopic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length
+            ? activeTopic.keywords.filter(kw => kwHit(kw, msgLower)).length
             : 0;
         if (overlapCount >= 1) {
             return {
@@ -368,7 +380,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
                 continue;
             if (topic.keywords.length === 0)
                 continue;
-            const hits = topic.keywords.filter(kw => msgLower.includes(kw.toLowerCase())).length;
+            const hits = topic.keywords.filter(kw => kwHit(kw, msgLower)).length;
             if (hits >= 2 && hits > bestOtherHits) {
                 bestOtherHits = hits;
                 bestOtherTopic = topic;
