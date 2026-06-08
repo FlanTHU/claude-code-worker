@@ -22,6 +22,28 @@ echo "[1/2] Patching dispatch: $DISPATCH_FILE"
 # the misplaced block and re-apply correctly.
 DISPATCH_STATE=$(python3 -c "
 import sys
+# Strip string/template literals and // line comments so brace-counting only
+# sees code structure: a '}' inside a string or comment must not shift the
+# nesting depth. Limitations (acceptable here, and node -c backstops any
+# misjudge): does not handle /* */ block comments, escaped quotes, or regex
+# literals like /[{}]/ — none of which occur between the before_dispatch
+# hasHooks line and its closing brace in the dispatch bundle we patch.
+_Q = (chr(39), chr(34), chr(96))
+def _code_only(line):
+    out = []; i = 0; n = len(line); q = None
+    while i < n:
+        c = line[i]
+        if q is None:
+            if c in _Q:
+                q = c
+            elif c == '/' and i + 1 < n and line[i + 1] == '/':
+                break
+            else:
+                out.append(c)
+        elif c == q:
+            q = None
+        i += 1
+    return ''.join(out)
 content = open('$DISPATCH_FILE').read()
 lines = content.split('\n')
 if 'session re-routed to' not in content:
@@ -38,10 +60,14 @@ if bd == -1:
     print('MISPLACED'); sys.exit(0)
 # Brace-balance from the before_dispatch hasHooks line to find where its block
 # closes. The routing block is in scope iff it starts BEFORE that closing brace.
+# Count braces on code only (strings/comments stripped) to avoid miscounting
+# braces that live inside log templates or regexes.
 depth = 0; started = False; close_idx = -1
 for i in range(bd, len(lines)):
-    depth += lines[i].count('{') - lines[i].count('}')
-    if lines[i].count('{') > 0:
+    code = _code_only(lines[i])
+    opens = code.count('{'); closes = code.count('}')
+    depth += opens - closes
+    if opens > 0:
         started = True
     if started and depth <= 0:
         close_idx = i; break
