@@ -159,10 +159,12 @@ async function deriveDisplayName(
     model,
     messages: [
       {
+        // mimo 是推理模型，若把用户内容直接当 user 消息会被当成"提问"去作答而非起名。
+        // 必须明确"命名器"角色，并把内容包成"为以下文本起标题"，强约束只输出标题。
         role: 'system',
-        content: '用2-6字命名话题，只返回名称，不超过6个汉字。例：帮我写redis缓存代码→Redis缓存，明天北京下雨吗→北京天气，小腿肌肉一直抽动→肌肉抽动',
+        content: '你是话题命名器。任务：为用户提供的文本起一个2-6个汉字的简短标题。只输出标题本身，禁止回答文本内容、禁止解释、禁止标点符号。',
       },
-      { role: 'user', content: content.slice(0, 100) },
+      { role: 'user', content: `为以下文本起标题：「${content.slice(0, 100)}」` },
     ],
     max_tokens: 2000,
     temperature: 0.1,
@@ -188,14 +190,23 @@ async function deriveDisplayName(
     const msg = data?.choices?.[0]?.message;
     const contentText = (msg?.content ?? '').trim();
     const reasoningText = (msg?.reasoning_content ?? '').trim();
-    const raw = contentText || reasoningText;
-    if (!raw) return fallback;
+    if (!contentText && !reasoningText) return fallback;
 
-    const lines = raw.split('\n').filter((l: string) => l.trim());
-    const answer = lines[lines.length - 1]?.trim().replace(/^["""]+|["""]+$/g, '') ?? '';
+    const clean = (s: string): string =>
+      s.trim().replace(/^["“”「」『』\s]+|["“”「」『』\s]+$/g, '');
+
+    // content 优先：新 prompt 下 content 就是干净标题（可能含首尾引号/书名号）。
+    // 仅当 content 为空（mimo 偶发把答案放进 reasoning）才回退到 reasoning 末行。
+    let answer = clean(contentText);
+    let from = 'content';
+    if (!answer) {
+      const lines = reasoningText.split('\n').filter((l: string) => l.trim());
+      answer = clean(lines[lines.length - 1] ?? '');
+      from = 'reasoning';
+    }
 
     if (answer && answer.length <= 12 && answer.length >= 2) {
-      log(`[hook-handler] Generated display name: "${answer}" (from ${contentText ? 'content' : 'reasoning'})`);
+      log(`[hook-handler] Generated display name: "${answer}" (from ${from})`);
       return answer;
     }
     return fallback;
