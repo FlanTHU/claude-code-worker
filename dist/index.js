@@ -150,7 +150,7 @@ export default definePluginEntry({
                 }
                 // Ended topic: don't silently open an empty same-name session.
                 if (topic.status === 'ended') {
-                    return { text: `⚠️ 话题 **${topic.displayName}** (${topic.label}) 已结束，无法切回其上下文。\n→ 发送 \`/new ${topic.label}\` 开启同名新话题，或 \`/topics\` 查看现有话题。` };
+                    return { text: `⚠️ 话题 **${topic.displayName}** (${topic.label}) 已结束，无法切回其上下文。\n→ 发送 \`/newtopic ${topic.label}\` 开启同名新话题，或 \`/topics\` 查看现有话题。` };
                 }
                 const currentTopic = registry.getActive();
                 // V4: Soft Fork merge-back
