@@ -4,6 +4,7 @@ import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew } from './src/hook-handler.js';
 import { FeedbackStore } from './src/feedback-store.js';
 import { ContextBridge } from './src/context-bridge.js';
+import { looksLikeNoContext, extractAssistantText } from './src/no-context-detect.js';
 import type { TopicRouterConfig } from './src/types.js';
 import type { LLMConfig } from './src/llm-client.js';
 
@@ -283,7 +284,20 @@ export default definePluginEntry({
         const autoNew = getRecentAutoNew(sessionKey);
         let footer: string;
         if (autoNew && autoNew.newLabel === label) {
-          footer = `\n\n---\n📌 新话题: ${displayName} | 如非新话题，发送 \`/switch ${autoNew.previousLabel}\` 回到「${autoNew.previousDisplayName}」`;
+          // Auto-switch-back: this reply came from a freshly auto-created topic. If the
+          // agent explicitly says it lacks prior context, the routing was almost certainly
+          // wrong — the message was a follow-up that belonged to the parent topic. Switch
+          // the active topic back so the user's NEXT message lands there, and tell them to
+          // just resend (this turn can't be salvaged — the reply already went out). We only
+          // act on an explicit "no context" declaration, never a generic clarifying question,
+          // so genuine new topics are not merged back (would re-trigger topic-collapse).
+          if (looksLikeNoContext(extractAssistantText(event))) {
+            registry.setActive(autoNew.previousLabel);
+            log.info(`[topic-router-output] No-context reply in auto-new topic "${label}"; auto-switched active back to "${autoNew.previousLabel}"`);
+            footer = `\n\n---\n⚠️ 检测到这条可能是上个话题的追问，已自动切回「${autoNew.previousDisplayName}」。请重发刚才的消息即可在原上下文继续。`;
+          } else {
+            footer = `\n\n---\n📌 新话题: ${displayName} | 如非新话题，发送 \`/switch ${autoNew.previousLabel}\` 回到「${autoNew.previousDisplayName}」`;
+          }
           clearRecentAutoNew(sessionKey);
         } else {
           footer = `\n\n---\n📌 话题: ${displayName}`;
