@@ -49,7 +49,19 @@ while IFS= read -r f; do
   COPIED=$((COPIED + 1))
 done < <(git ls-tree -r --name-only HEAD dist/src | grep '\.js$')
 git show HEAD:dist/index.js > /app/dist/extensions/topic-router/index.js
-echo "Files copied ($COPIED modules + index.js)."
+
+# Deploy the plugin manifest. WITHOUT activation.onStartup the gateway discovers the
+# directory but never activates the plugin — it silently drops from the load list (no
+# "loading topic-router" log, no error), even with enabled:true in config. A manifest
+# lacking this field is exactly how topic-router went missing in prod. Ship the
+# committed manifest as the single source of truth and hard-fail if it regresses.
+MANIFEST_DST="/app/dist/extensions/topic-router/openclaw.plugin.json"
+git show HEAD:openclaw.plugin.json > "$MANIFEST_DST"
+if ! grep -q '"onStartup"' "$MANIFEST_DST"; then
+  echo "✗ FATAL: deployed manifest missing activation.onStartup — gateway will not load topic-router. Aborting."
+  exit 1
+fi
+echo "Files copied ($COPIED modules + index.js + manifest)."
 
 echo ""
 echo "=== Step 2.5: Ensure writable state dirs ==="

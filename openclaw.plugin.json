@@ -1,0 +1,17 @@
+{
+  "id": "topic-router",
+  "name": "Topic Router",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
+  "channels": [],
+  "skills": [],
+  "contracts": {
+    "tools": []
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}
