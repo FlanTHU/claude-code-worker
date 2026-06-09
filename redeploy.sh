@@ -35,18 +35,21 @@ fi
 echo ""
 echo "=== Step 2: Copy dist files ==="
 mkdir -p "$DST"
-git show HEAD:dist/src/hook-handler.js > "$DST/hook-handler.js"
-git show HEAD:dist/src/classifier.js > "$DST/classifier.js"
-git show HEAD:dist/src/commands.js > "$DST/commands.js"
-git show HEAD:dist/src/topic-registry.js > "$DST/topic-registry.js"
-git show HEAD:dist/src/llm-client.js > "$DST/llm-client.js"
-git show HEAD:dist/src/utils.js > "$DST/utils.js"
-git show HEAD:dist/src/types.js > "$DST/types.js" 2>/dev/null || true
-git show HEAD:dist/src/conversation-store.js > "$DST/conversation-store.js" 2>/dev/null || true
-git show HEAD:dist/src/feedback-store.js > "$DST/feedback-store.js" 2>/dev/null || true
-git show HEAD:dist/src/context-bridge.js > "$DST/context-bridge.js" 2>/dev/null || true
+# Copy EVERY compiled file under dist/src/ — do not hardcode a whitelist. A static
+# list silently drops newly-added modules (e.g. no-context-detect.js): index.js then
+# imports a file that was never deployed → plugin load fails → "plugin not found:
+# topic-router" → Invalid config. Enumerate from the committed tree so any new .js is
+# picked up automatically.
+COPIED=0
+while IFS= read -r f; do
+  # f looks like "dist/src/foo.js"; strip the "dist/src/" prefix for the destination.
+  rel="${f#dist/src/}"
+  mkdir -p "$DST/$(dirname "$rel")"
+  git show "HEAD:$f" > "$DST/$rel"
+  COPIED=$((COPIED + 1))
+done < <(git ls-tree -r --name-only HEAD dist/src | grep '\.js$')
 git show HEAD:dist/index.js > /app/dist/extensions/topic-router/index.js
-echo "Files copied."
+echo "Files copied ($COPIED modules + index.js)."
 
 echo ""
 echo "=== Step 2.5: Ensure writable state dirs ==="
