@@ -89,6 +89,30 @@ const SWITCH_SIGNALS = [
     'let me ask about', 'switching topics',
     'going back to', 'about that earlier',
 ];
+/**
+ * Phrases that explicitly REFER BACK to earlier conversation ("之前说的", "刚才那个",
+ * "你提到的"). Unlike CONTINUATION_SIGNALS these may appear anywhere in the sentence,
+ * so they're matched with `includes`. A message referring to prior context almost
+ * never starts a genuinely new topic — without this, the classifier mis-routes such
+ * follow-ups to a fresh (empty) session, and the agent replies "I have no prior
+ * context" (the soft-fork gap). Pulling them to `continue` removes that failure.
+ *
+ * MUST be compound phrases, never bare "之前"/"那个": a bare token false-matches real
+ * new topics ("帮我查之前武汉的天气"), which would re-introduce the topic-collapse the
+ * runaway valve fixed. Compound phrases only fire on true back-references.
+ */
+const REFERENCE_SIGNALS = [
+    '之前说的', '之前提到', '之前讲的', '之前那个', '之前的那', '之前聊的', '之前说过',
+    '刚才说的', '刚才提到', '刚才那个', '刚才讲的', '刚说的', '刚提到', '刚才的那',
+    '你刚才', '你刚说', '你说的那', '你提到的', '你提到过', '你刚提',
+    '上面说的', '上面提到', '上面那个', '前面说的', '前面提到', '前面那个',
+    '我们刚才', '我们之前', '咱们刚才', '咱们之前',
+    '接着上面', '接着刚才', '顺着刚才', '顺着上面',
+    '上文', '前文',
+    'you mentioned', 'you said', 'as you said', 'like you said',
+    'the one you', 'that you mentioned', 'continuing from', 'following up on',
+    'earlier you',
+];
 export function detectContinuation(content, _recentMessages, activeTopic) {
     if (!activeTopic)
         return null;
@@ -103,6 +127,19 @@ export function detectContinuation(content, _recentMessages, activeTopic) {
             targetLabel: activeTopic.label,
             confidence: 0.85,
             reason: `Continuation signal detected, staying on "${activeTopic.label}"`,
+        };
+    }
+    // Back-reference phrases anywhere in the message → continuation. Confidence kept
+    // at the same 0.85 as a leading continuation signal (a back-reference is an equally
+    // strong continuity cue) so it stays ≥ the adaptive threshold ceiling (0.85) and
+    // the classifier returns here (L1), never reaching the auto-new rules in L1.5.
+    const hasReferenceSignal = REFERENCE_SIGNALS.some(s => normalized.includes(s.toLowerCase()));
+    if (hasReferenceSignal) {
+        return {
+            action: 'continue',
+            targetLabel: activeTopic.label,
+            confidence: 0.85,
+            reason: `Back-reference to prior context, staying on "${activeTopic.label}"`,
         };
     }
     return null;

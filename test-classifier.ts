@@ -254,6 +254,41 @@ async function testRunawayValve() {
   assert(r3.action === 'continue', `Below runaway threshold (5 msgs) + zero idle → continue (got ${r3.action})`);
 }
 
+async function testReferenceContinue() {
+  // C: a message that explicitly refers back to earlier conversation must stay on the
+  // active topic (continue), NOT spawn a new one — even when the active topic is
+  // saturated + idle (the very condition that otherwise triggers auto-new). This is the
+  // source-side fix for the mis-route that leaves the agent with no context.
+  console.log('\n=== Reference-Signal Continue (back-reference stays on topic) ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('coding', '编程');
+  registry.learnKeywords('coding', 'python typescript debugging redis');
+
+  // Saturate + long idle so auto-new WOULD fire on an unrelated substantial message.
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['coding'].messageCount = 12;
+  data.topics['coding'].lastActiveAt = Date.now() - 45 * 60 * 1000;
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  // Back-reference phrases → continue despite saturation/idle/zero-overlap.
+  const refMsgs = [
+    '你之前说的那个方案再展开讲讲',
+    '刚才提到的第二点是什么意思',
+    '上面说的那个怎么操作',
+    'about the one you mentioned earlier, how does it work',
+  ];
+  for (const m of refMsgs) {
+    const r = await classify(m, [], registry, config);
+    assert(r.action === 'continue', `Back-reference "${m.slice(0, 12)}…" → continue (got ${r.action})`);
+  }
+
+  // Guard: a bare "之前" inside a genuinely new unrelated request must NOT be pulled
+  // back (compound-phrase matching only) — otherwise topic-collapse returns.
+  const rNew = await classify('帮我查之前武汉总部食堂今天的菜单', [], registry, config);
+  assert(rNew.action === 'new', `Bare "之前" in new request → new, not pulled back (got ${rNew.action})`);
+}
+
 async function main() {
   await testL0();
   await testNoTopics();
@@ -265,6 +300,7 @@ async function main() {
   await testSaturationAutoNew();
   await testSaturationNotMet();
   await testRunawayValve();
+  await testReferenceContinue();
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
   if (failed > 0) process.exit(1);
