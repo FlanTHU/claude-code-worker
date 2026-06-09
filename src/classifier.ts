@@ -223,7 +223,11 @@ ${recentCtx}
   log(`[classifier-llm] Calling LLM for classification...`);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  // mimo is a reasoning model: classification calls routinely take ~10s. An 8s
+  // timeout aborted every request, tripping the circuit breaker (3 fails → 60s
+  // cooldown) and dropping the whole session to pure-rule routing. Aligned with
+  // the 20s used for naming/keyword extraction (commit 0e9f45a missed this one).
+  const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -492,6 +496,41 @@ export async function classify(
         confidence: 0.65,
         reason: `Keyword match (${bestOtherHits}) to "${bestOtherTopic.label}", switching from "${activeTopic.label}"`,
       };
+    }
+
+    // Count-only saturation safety valve (LLM-down path only).
+    //
+    // Every idle-based auto-new (Rule A/B/B-short in L1.5) needs a time gap between
+    // messages. When the LLM classifier is unavailable (circuit open / no key / rule
+    // mode) AND messages arrive back-to-back (idle never accrues — e.g. an automated
+    // eval harness firing 29 tasks with no pause), those rules never fire and EVERY
+    // message falls through to the sticky-continue below. One topic then absorbs the
+    // entire session unbounded (observed: a "读取多维表格" topic swallowed 69 msgs
+    // across completely unrelated tasks).
+    //
+    // This valve breaks the runaway WITHOUT reintroducing the manual-/switch death
+    // loop fixed in 1281f53: that loop is a handful of exchanges on a freshly switched
+    // topic and lives in the LLM-healthy path (L2). We gate on a HIGH message count
+    // (well above any real on-topic chat or that loop) so only a genuinely ballooning
+    // topic forks, and still require zero overlap with EVERY active topic + substantial.
+    const adaptive = config._adaptiveThresholds;
+    const saturationCount = adaptive?.saturationMessageCount ?? 5;
+    const RUNAWAY_MSG_THRESHOLD = Math.max(saturationCount * 3, 15);
+    const trimmedL3 = content.trim();
+    const isSubstantialL3 = (trimmedL3.length > 6 && /[？?。！!]/.test(trimmedL3)) || trimmedL3.length > 15;
+    if (activeTopic.messageCount >= RUNAWAY_MSG_THRESHOLD && isSubstantialL3) {
+      const anyActiveOverlap = allTopics
+        .filter(t => t.status !== 'ended')
+        .some(t => t.keywords.length > 0 && t.keywords.some(kw => kwHit(kw, msgLower)));
+      if (!anyActiveOverlap) {
+        _log(`[classifier] Auto-new (runaway saturation, LLM down): active="${activeTopic.label}" has ${activeTopic.messageCount} msgs, 0 overlap with any active topic`);
+        return {
+          action: 'new',
+          targetLabel: null,
+          confidence: 0.6,
+          reason: `Active topic "${activeTopic.label}" ballooned to ${activeTopic.messageCount} msgs with zero overlap (LLM unavailable) — forking new topic`,
+        };
+      }
     }
 
     // Sticky session — saturation+idle auto-new is handled in L1.5 above

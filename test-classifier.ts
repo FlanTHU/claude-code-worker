@@ -212,6 +212,48 @@ async function testSaturationNotMet() {
   assert(r2.action === 'continue', `High msgs but recent (5min) → continue (got ${r2.action})`);
 }
 
+async function testRunawayValve() {
+  // L3 count-only safety valve: when the LLM classifier is unavailable (here:
+  // mode 'rules' → L2 skipped) AND messages arrive back-to-back (idle ~0, so all
+  // idle-based L1.5 rules are inert), a single active topic must not absorb the
+  // session unbounded. Regression guard for the 29-task eval that collapsed into
+  // one "读取多维表格" topic swallowing 69 unrelated messages.
+  console.log('\n=== Runaway Valve (LLM down + zero idle + ballooning topic) ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('coding', '编程');
+  registry.learnKeywords('coding', 'python typescript debugging redis');
+
+  // Many messages but JUST active (idle ~0 → recentlyActive=true → Rule A/B/B-short
+  // all inert). This is exactly the eval scenario the idle rules cannot catch.
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['coding'].messageCount = 20;
+  data.topics['coding'].lastActiveAt = Date.now(); // idle ~0
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  // Substantial unrelated message → valve forks a new topic despite zero idle.
+  const r = await classify('帮我创建一个测试群聊并修改群名称？', [], registry, config);
+  assert(r.action === 'new', `Ballooned topic (20 msgs) + zero idle + unrelated → new (got ${r.action})`);
+
+  // Related message with a single keyword hit → stays via L3 overlap (valve must
+  // not fire). One keyword (not 2+) so it falls through L1 matchKeywords to L3,
+  // where overlapCount>=1 yields continue before the valve is reached.
+  const r2 = await classify('typescript这块该怎么写才对？', [], registry, config);
+  assert(r2.action === 'continue', `Ballooned but keyword overlap → continue (got ${r2.action})`);
+
+  // Below the runaway threshold → sticky continue (valve must not fire on small topics).
+  resetState();
+  const reg2 = new TopicRegistry(STATE_DIR);
+  reg2.getOrCreate('coding', '编程');
+  reg2.learnKeywords('coding', 'python typescript debugging redis');
+  const d2 = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  d2.topics['coding'].messageCount = 5; // below max(5*3,15)=15
+  d2.topics['coding'].lastActiveAt = Date.now();
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(d2));
+  const r3 = await classify('帮我创建一个测试群聊并修改群名称？', [], reg2, config);
+  assert(r3.action === 'continue', `Below runaway threshold (5 msgs) + zero idle → continue (got ${r3.action})`);
+}
+
 async function main() {
   await testL0();
   await testNoTopics();
@@ -222,6 +264,7 @@ async function main() {
   await testNoActiveTopicPassthrough();
   await testSaturationAutoNew();
   await testSaturationNotMet();
+  await testRunawayValve();
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
   if (failed > 0) process.exit(1);
