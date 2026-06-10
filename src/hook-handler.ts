@@ -4,6 +4,7 @@ import { classify, generateTopicLabel, determineUIStrategy } from './classifier.
 import { isTargetSession } from './utils.js';
 import { tryHandleCommand } from './commands.js';
 import type { LLMConfig } from './llm-client.js';
+import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './llm-client.js';
 import type { FeedbackStore } from './feedback-store.js';
 import type { ContextBridge } from './context-bridge.js';
 
@@ -11,6 +12,20 @@ const RECENT_MESSAGE_WINDOW = 5;
 const MAX_TRACKED_SESSIONS = 50;
 
 const recentMessagesBySession = new Map<string, string[]>();
+
+// ── Per-session serialization queue (concurrency guard) ──
+// TopicRegistry does reload→mutate→save with no lock, and classify() can await an LLM
+// call for up to ~20s. When a user fires several messages in quick succession, two
+// async handler runs interleave: activeSessionKey races (last-writer-wins), and the
+// module-level recentMessages / feedbackStore.lastRoute get clobbered — messages route
+// to the wrong topic and self-learning feedback links to the wrong route. The gateway
+// serializes per-session AFTER the session is chosen, but topic classification happens
+// BEFORE that, outside its lock. We add our own per-session FIFO: each session key holds
+// a promise chain; a new message waits for the previous one's classify+route to finish.
+// Keyed on the INBOUND sessionKey (the original key, stable per conversation — routing
+// rewrites it only in the return value, after we're done). Different sessions don't block
+// each other; only same-session back-to-back messages serialize.
+const handlerQueueBySession = new Map<string, Promise<unknown>>();
 
 // Track recently auto-created topics for "switch back" hints
 export interface RecentAutoNew {
@@ -72,8 +87,8 @@ async function extractKeywords(
 ): Promise<string[]> {
   if (!llmConfig?.apiKey) return [];
 
-  const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
+  const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
+  const model = llmConfig.model ?? DEFAULT_MODEL;
   const url = `${baseUrl}/chat/completions`;
 
   const body = {
@@ -178,8 +193,8 @@ async function deriveDisplayName(
 
   if (!llmConfig?.baseUrl && !llmConfig?.apiKey) return fallback;
 
-  const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
+  const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
+  const model = llmConfig.model ?? DEFAULT_MODEL;
   const url = `${baseUrl}/chat/completions`;
 
   const body = {
@@ -257,7 +272,7 @@ async function deriveDisplayName(
  * - Return undefined (not handled) → gateway processes with full tools/skills
  * - Footer added via separate output hook
  */
-export async function handleBeforeDispatch(params: {
+interface HandleParams {
   event: any;
   ctx: any;
   registry: TopicRegistry;
@@ -267,7 +282,44 @@ export async function handleBeforeDispatch(params: {
   log: (...args: unknown[]) => void;
   feedbackStore?: FeedbackStore;
   contextBridge?: ContextBridge;
-}): Promise<HookResult | undefined> {
+}
+
+/**
+ * Public entry point. Serializes handling per inbound session key so concurrent
+ * messages from the same conversation never interleave their classify→route→state
+ * mutations (see handlerQueueBySession comment). Different sessions run in parallel.
+ */
+export async function handleBeforeDispatch(params: HandleParams): Promise<HookResult | undefined> {
+  const queueKey: string = params.ctx?.sessionKey || params.event?.sessionKey || '';
+
+  // No usable key → can't serialize meaningfully; run directly (rare, e.g. malformed event).
+  if (!queueKey) {
+    return handleBeforeDispatchInner(params);
+  }
+
+  const prev = handlerQueueBySession.get(queueKey) ?? Promise.resolve();
+  // Chain after the previous run regardless of how it settled, so one message's failure
+  // never breaks the chain for the next. `tail` never rejects → safe to chain onto and
+  // safe to store as the map value.
+  const tail = prev.then(
+    () => handleBeforeDispatchInner(params),
+    () => handleBeforeDispatchInner(params)
+  ).catch(() => undefined);
+  handlerQueueBySession.set(queueKey, tail);
+
+  // Bound the map: once this run settles, drop the entry if it's still the latest (no
+  // newer message has chained on and overwritten it).
+  tail.finally(() => {
+    if (handlerQueueBySession.get(queueKey) === tail) {
+      handlerQueueBySession.delete(queueKey);
+    }
+  });
+
+  // Return the real result/rejection to the caller, distinct from the never-rejecting tail.
+  return tail.then(r => r as HookResult | undefined);
+}
+
+async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResult | undefined> {
   const { event, ctx, registry, config, classifierLlmConfig, log, feedbackStore, contextBridge } = params;
 
   const content: string = event.cleanedBody || event.content || event.body || '';
@@ -302,9 +354,20 @@ export async function handleBeforeDispatch(params: {
   const trimmed = content.trim();
 
   // Commands are handled directly (they return text, no routing needed)
-  // Note: /new is NOT intercepted here — it's reserved for gateway's native "new session" command
   // /topic-router is handled by registerCommand, skip routing for it
   if (/^\/topic-router\b/i.test(trimmed)) {
+    return undefined;
+  }
+
+  // Gateway-native commands (/new, /reset, /clear) must be passed through untouched.
+  // They are NOT plugin commands, but if we don't short-circuit here they fall through
+  // to the classifier, get judged as a brand-new topic, and the command text itself
+  // ("/NEW") is hashed into a junk topic (label like "vnxt", displayName "/NEW") that
+  // pollutes /topics — while the gateway separately resets the native session. We must
+  // NOT route or create a topic for these: return undefined so the gateway handles them.
+  // (newtopic/endall must be matched BEFORE this guard so "new" doesn't swallow them.)
+  if (/^\/(new|reset|clear)\b/i.test(trimmed)) {
+    log(`[hook-handler] Gateway-native command "${trimmed.split(/\s/)[0]}" — passthrough, not routing/creating a topic`);
     return undefined;
   }
 

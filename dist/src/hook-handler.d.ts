@@ -18,7 +18,7 @@ export declare function clearRecentAutoNew(sessionKey: string): void;
  * - Return undefined (not handled) → gateway processes with full tools/skills
  * - Footer added via separate output hook
  */
-export declare function handleBeforeDispatch(params: {
+interface HandleParams {
     event: any;
     ctx: any;
     registry: TopicRegistry;
@@ -28,4 +28,11 @@ export declare function handleBeforeDispatch(params: {
     log: (...args: unknown[]) => void;
     feedbackStore?: FeedbackStore;
     contextBridge?: ContextBridge;
-}): Promise<HookResult | undefined>;
+}
+/**
+ * Public entry point. Serializes handling per inbound session key so concurrent
+ * messages from the same conversation never interleave their classify→route→state
+ * mutations (see handlerQueueBySession comment). Different sessions run in parallel.
+ */
+export declare function handleBeforeDispatch(params: HandleParams): Promise<HookResult | undefined>;
+export {};

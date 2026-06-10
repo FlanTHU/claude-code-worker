@@ -3,7 +3,7 @@
  * Run: npx tsx test-classifier.ts
  */
 
-import { classify, parseExplicitCommand, matchKeywords, detectContinuation } from './src/classifier.js';
+import { classify, parseExplicitCommand, matchKeywords, detectContinuation, generateTopicLabel } from './src/classifier.js';
 import { TopicRegistry } from './src/topic-registry.js';
 import fs from 'node:fs';
 
@@ -289,6 +289,19 @@ async function testReferenceContinue() {
   assert(rNew.action === 'new', `Bare "之前" in new request → new, not pulled back (got ${rNew.action})`);
 }
 
+function testSlashLabelGuard() {
+  // §3b defense-in-depth: generateTopicLabel must NOT hash slash-command text into a
+  // per-command junk label (the "/NEW (vnxt)" pollution). Any "/"-prefixed content
+  // collapses to the single stable "misc" bucket; real content keeps its normal label.
+  console.log('\n=== Slash-command label guard (§3b backstop) ===');
+  assert(generateTopicLabel('/NEW') === 'misc', `/NEW → misc (got ${generateTopicLabel('/NEW')})`);
+  assert(generateTopicLabel('/reset') === 'misc', `/reset → misc (got ${generateTopicLabel('/reset')})`);
+  assert(generateTopicLabel('/foobar baz') === 'misc', `/foobar → misc (got ${generateTopicLabel('/foobar baz')})`);
+  // Real content unaffected: keyword pattern still wins.
+  assert(generateTopicLabel('今天天气怎么样') === 'weather', `weather content → weather (got ${generateTopicLabel('今天天气怎么样')})`);
+  assert(generateTopicLabel('帮我看看这段 python 代码') === 'coding', `coding content → coding (got ${generateTopicLabel('帮我看看这段 python 代码')})`);
+}
+
 async function main() {
   await testL0();
   await testNoTopics();
@@ -301,6 +314,7 @@ async function main() {
   await testSaturationNotMet();
   await testRunawayValve();
   await testReferenceContinue();
+  testSlashLabelGuard();
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
   if (failed > 0) process.exit(1);

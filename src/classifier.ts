@@ -11,6 +11,7 @@ import type { ClassifyResult, TopicEntry, TopicRouterConfig, AdaptiveThresholds,
 import type { TopicRegistry } from './topic-registry.js';
 import { STOPWORDS } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
+import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './llm-client.js';
 
 /**
  * Does message `msg` (already lowercased) overlap topic keyword `kw`?
@@ -227,8 +228,8 @@ async function classifyWithLLM(
   llmConfig: LLMConfig,
   log: (...args: unknown[]) => void
 ): Promise<ClassifyResult | null> {
-  const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-  const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
+  const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
+  const model = llmConfig.model ?? DEFAULT_MODEL;
   const url = `${baseUrl}/chat/completions`;
 
   const topicSummary = allTopics.map(t => {
@@ -610,6 +611,16 @@ export async function classify(
 
 export function generateTopicLabel(content: string): string {
   const normalized = content.trim();
+
+  // Defense-in-depth against slash-command pollution: a message starting with "/" is a
+  // command, not topic content. If one slips past the hook-handler intercept (e.g. an
+  // unforeseen gateway command), do NOT hash its text into a per-command junk label
+  // (every distinct command would spawn its own topic). Collapse them all to one stable
+  // bucket so they never fragment /topics. The hook-handler passthrough is the primary
+  // guard; this is the backstop.
+  if (normalized.startsWith('/')) {
+    return 'misc';
+  }
 
   const patterns: Array<{ regex: RegExp; label: string }> = [
     { regex: /天气|下雨|温度|气温|forecast|weather/i, label: 'weather' },

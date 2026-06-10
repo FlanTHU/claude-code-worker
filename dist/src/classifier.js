@@ -7,6 +7,7 @@
  *   L2: LLM fallback for ambiguous cases
  */
 import { STOPWORDS } from './topic-registry.js';
+import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './llm-client.js';
 /**
  * Does message `msg` (already lowercased) overlap topic keyword `kw`?
  * A keyword counts only if it's NOT a high-frequency stop/place/time word —
@@ -172,8 +173,8 @@ function recordLLMSuccess() {
 }
 const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
-    const baseUrl = llmConfig.baseUrl ?? 'http://model.mify.ai.srv/v1';
-    const model = llmConfig.model ?? 'xiaomi/mimo-v2.5-mit';
+    const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
+    const model = llmConfig.model ?? DEFAULT_MODEL;
     const url = `${baseUrl}/chat/completions`;
     const topicSummary = allTopics.map(t => {
         const isActive = t.label === activeTopic?.label ? ' [当前活跃]' : '';
@@ -512,6 +513,15 @@ export async function classify(content, recentMessages, registry, config, llmCon
 // ---------------------------------------------------------------------------
 export function generateTopicLabel(content) {
     const normalized = content.trim();
+    // Defense-in-depth against slash-command pollution: a message starting with "/" is a
+    // command, not topic content. If one slips past the hook-handler intercept (e.g. an
+    // unforeseen gateway command), do NOT hash its text into a per-command junk label
+    // (every distinct command would spawn its own topic). Collapse them all to one stable
+    // bucket so they never fragment /topics. The hook-handler passthrough is the primary
+    // guard; this is the backstop.
+    if (normalized.startsWith('/')) {
+        return 'misc';
+    }
     const patterns = [
         { regex: /天气|下雨|温度|气温|forecast|weather/i, label: 'weather' },
         { regex: /代码|编程|bug|debug|脚本|code|python|java|rust|golang|redis|mysql|mongodb|docker|k8s|kubernetes|nginx|api|http|tcp|数据库|缓存|memcached/i, label: 'coding' },
