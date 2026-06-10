@@ -7,6 +7,7 @@ import { ContextBridge } from './src/context-bridge.js';
 import { looksLikeNoContext, extractAssistantText } from './src/no-context-detect.js';
 import type { TopicRouterConfig } from './src/types.js';
 import type { LLMConfig } from './src/llm-client.js';
+import { resolveClassifierLlmConfig } from './src/llm-client.js';
 
 function definePluginEntry<T>(opts: T): T { return opts; }
 
@@ -26,11 +27,6 @@ const DEFAULT_CONFIG: TopicRouterConfig = {
     feedback: { enabled: true, adaptInterval: 20 },
     hints: { enabled: true, lowThreshold: 0.5, highThreshold: 0.75 },
   },
-};
-
-const DEFAULT_LLM_CONFIG: LLMConfig = {
-  baseUrl: 'http://model.mify.ai.srv/v1',
-  model: 'xiaomi/mimo-v2.5-mit',
 };
 
 export default definePluginEntry({
@@ -229,13 +225,10 @@ export default definePluginEntry({
     // Classifier uses mimo (fast, cheap). Reply dispatches via openclaw agent CLI (full pipeline).
     const apiKey = process.env.MODEL_API_KEY || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 
-    const classifierLlmConfig: LLMConfig = {
-      baseUrl: 'http://model.mify.ai.srv/v1',
-      model: 'xiaomi/mimo-v2.5-mit',
-      apiKey,
-    };
+    // Cluster-aware config (normal/vip) from env; defaults reproduce prior hardcoded values.
+    const { config: classifierLlmConfig, cluster } = resolveClassifierLlmConfig(process.env, apiKey);
 
-    log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} | Reply: session routing (full agent pipeline)`);
+    log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} (cluster=${cluster}, baseUrl=${classifierLlmConfig.baseUrl}) | Reply: session routing (full agent pipeline)`);
 
     const hookHandler = async (event: any, ctx: any) => {
       if (!readToggle(toggleFile)) return undefined;
