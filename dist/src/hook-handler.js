@@ -230,7 +230,8 @@ export async function handleBeforeDispatch(params) {
     // Chain after the previous run regardless of how it settled, so one message's failure
     // never breaks the chain for the next. `tail` never rejects → safe to chain onto and
     // safe to store as the map value.
-    const tail = prev.then(() => handleBeforeDispatchInner(params), () => handleBeforeDispatchInner(params)).catch(() => undefined);
+    const run = prev.then(() => handleBeforeDispatchInner(params), () => handleBeforeDispatchInner(params));
+    const tail = run.catch(() => undefined);
     handlerQueueBySession.set(queueKey, tail);
     // Bound the map: once this run settles, drop the entry if it's still the latest (no
     // newer message has chained on and overwritten it).
@@ -240,7 +241,7 @@ export async function handleBeforeDispatch(params) {
         }
     });
     // Return the real result/rejection to the caller, distinct from the never-rejecting tail.
-    return tail.then(r => r);
+    return run;
 }
 async function handleBeforeDispatchInner(params) {
     const { event, ctx, registry, config, classifierLlmConfig, log, feedbackStore, contextBridge } = params;
@@ -321,7 +322,7 @@ async function handleBeforeDispatchInner(params) {
             const targetDesc = result.action === 'new' ? '新话题' : `话题「${result.targetLabel}」`;
             return {
                 handled: true,
-                text: `🤔 这条消息可能属于${targetDesc}。\n→ /new 创建新话题 | 继续发消息留在当前话题`,
+                text: `🤔 这条消息可能属于${targetDesc}。\n→ /newtopic 创建新话题 | 继续发消息留在当前话题`,
             };
         }
     }
