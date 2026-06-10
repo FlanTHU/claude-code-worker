@@ -171,7 +171,9 @@ function recordLLMSuccess() {
     llmFailCount = 0;
     llmCircuitOpenUntil = 0;
 }
-const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
+const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。
+注意：一条消息即便字面上是独立的祈使句（如"搜一下张三""读今天日程"），也可能是当前话题这个多步任务链里的中间步骤（如"搜张三"是为后面写日报而查人）。判断时结合最近消息看它是不是在为当前话题服务，是则 continue，不要因为它单独看像个新请求就判 new。
+不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
     const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
     const model = llmConfig.model ?? DEFAULT_MODEL;
@@ -181,8 +183,12 @@ async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, 
         const kws = t.keywords.slice(0, 8).join(', ');
         return `- ${t.label} (${t.displayName})${isActive}: 关键词=[${kws}], ${t.messageCount}条消息`;
     }).join('\n');
+    // Feed the full recent-message window (hook-handler tracks 5) with a wider per-line
+    // cap. The old slice(-3)/60-char truncation starved the LLM of the task-chain context
+    // needed to recognize an isolated-looking step ("搜张三") as part of the active topic,
+    // causing multi-step task chains to be over-split (run_027 regression).
     const recentCtx = recentMessages.length > 0
-        ? `\n最近消息（当前话题 "${activeTopic?.label ?? '无'}"）:\n${recentMessages.slice(-3).map(m => `  - ${m.slice(0, 60)}`).join('\n')}`
+        ? `\n最近消息（当前话题 "${activeTopic?.label ?? '无'}"，时间从旧到新）:\n${recentMessages.map(m => `  - ${m.slice(0, 120)}`).join('\n')}`
         : '';
     const userPrompt = `已有话题：
 ${topicSummary || '（暂无话题）'}
@@ -314,10 +320,26 @@ export async function classify(content, recentMessages, registry, config, llmCon
             reason: 'No existing topics + short message, passthrough',
         };
     }
+    // Continuity window shared by the L1 keyword guard and the L1.5 auto-new rules:
+    // the active topic was touched < 3min ago, i.e. this is an ongoing conversation.
+    const idleMs = activeTopic ? Date.now() - activeTopic.lastActiveAt : Infinity;
+    const RECENT_ACTIVE_WINDOW = 3 * 60 * 1000; // 3 minutes
+    const recentlyActive = !!activeTopic && activeTopic.messageCount > 0 && idleMs < RECENT_ACTIVE_WINDOW;
     // L1: High-confidence rules (skip LLM if confident)
     // Strong keyword match (2+ keywords hit)
     const keywordResult = matchKeywords(content, allTopics);
-    if (keywordResult && keywordResult.confidence >= effectiveConfig.classifier.confidenceThreshold) {
+    // Continuity-over-keyword guard: while the active topic is being actively talked to,
+    // a 2-keyword hit on ANOTHER topic must NOT pre-empt the session at L1 — an
+    // isolated-looking step in a multi-step chain ("搜张三") frequently hits a sibling
+    // topic's keywords (run_027: connected task chains got split this way). Defer such
+    // cross-topic switches to L2 (the LLM now sees the full recent context) / L3. This
+    // only suppresses cross-topic SWITCH; same-topic results, auto-new (L1.5) and the
+    // runaway valve (L3) are untouched, so it cannot revive the collapse fix — and if the
+    // LLM is unavailable the very same keywordResult is reapplied at L3.
+    const keywordIsCrossTopicSwitch = !!keywordResult && keywordResult.action === 'switch' &&
+        keywordResult.targetLabel !== activeTopic?.label;
+    if (keywordResult && keywordResult.confidence >= effectiveConfig.classifier.confidenceThreshold &&
+        !(recentlyActive && keywordIsCrossTopicSwitch)) {
         return keywordResult;
     }
     // Continuation signals / short messages
@@ -327,7 +349,6 @@ export async function classify(content, recentMessages, registry, config, llmCon
     }
     // L1.5: Auto-new checks (before LLM fallback)
     if (activeTopic && activeTopic.messageCount > 0) {
-        const idleMs = Date.now() - activeTopic.lastActiveAt;
         const msgLower = content.toLowerCase();
         const hasKeywordOverlap = activeTopic.keywords.length > 0 &&
             activeTopic.keywords.some(kw => kwHit(kw, msgLower));
@@ -340,8 +361,7 @@ export async function classify(content, recentMessages, registry, config, llmCon
         // topic again, and switching back loops forever. User intent (recent activity /
         // explicit switch) outranks keyword-overlap guessing. Saturation (Rule A) is
         // unaffected — it requires idle ≥10min, mutually exclusive with "recent".
-        const RECENT_ACTIVE_WINDOW = 3 * 60 * 1000; // 3 minutes
-        const recentlyActive = idleMs < RECENT_ACTIVE_WINDOW;
+        // (idleMs / recentlyActive are computed once above, before L1.)
         // Rule A: Saturation — topic has many messages + idle for a while + unrelated.
         // V4: thresholds come from feedback-store adaptive values when present, else defaults.
         const adaptive = config._adaptiveThresholds;
