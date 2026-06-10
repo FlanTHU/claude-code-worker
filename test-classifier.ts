@@ -289,6 +289,43 @@ async function testReferenceContinue() {
   assert(rNew.action === 'new', `Bare "之前" in new request → new, not pulled back (got ${rNew.action})`);
 }
 
+async function testContinuityOverKeyword() {
+  // ②-3 continuity-over-keyword guard: while the active topic is being actively talked
+  // to (recentlyActive), a 2-keyword hit on ANOTHER topic must not pre-empt the session
+  // at L1 — it defers to the LLM (which now sees full context). The deferral is the win
+  // ONLY in LLM mode; here we assert the LLM-DOWN (rules) fallback is intact: the same
+  // cross-topic keyword result is still reapplied at L3, so the message is deferred, not
+  // dropped. Regression guard against the guard accidentally stranding cross-topic msgs.
+  console.log('\n=== Continuity-over-keyword (L1 defer, L3 fallback intact) ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('coding', '编程');
+  registry.learnKeywords('coding', 'python typescript debugging');
+  registry.getOrCreate('travel', '旅游');
+  registry.learnKeywords('travel', '签证 机票 酒店 景点');
+  registry.setActive('travel');
+
+  // travel just touched + has messages → recentlyActive. A 2-coding-keyword message:
+  // L1 suppressed (cross-topic switch while recentlyActive), but in rules mode L3
+  // reapplies the keyword switch → still routes to coding (no stranding when LLM down).
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['travel'].messageCount = 3;
+  data.topics['travel'].lastActiveAt = Date.now(); // idle ~0 → recentlyActive
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  const r = await classify('python和typescript项目怎么选', [], registry, config);
+  assert(r.action === 'switch' && r.targetLabel === 'coding',
+    `LLM-down: recentlyActive cross-topic keyword still switches via L3 (got ${r.action}/${r.targetLabel})`);
+
+  // Same topic, but NOT recentlyActive (idle 10min) → L1 keyword switch fires directly.
+  const d2 = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  d2.topics['travel'].lastActiveAt = Date.now() - 10 * 60 * 1000;
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(d2));
+  const r2 = await classify('python和typescript项目怎么选', [], registry, config);
+  assert(r2.action === 'switch' && r2.targetLabel === 'coding',
+    `Not recentlyActive → L1 keyword switch fires (got ${r2.action}/${r2.targetLabel})`);
+}
+
 function testSlashLabelGuard() {
   // §3b defense-in-depth: generateTopicLabel must NOT hash slash-command text into a
   // per-command junk label (the "/NEW (vnxt)" pollution). Any "/"-prefixed content
@@ -314,6 +351,7 @@ async function main() {
   await testSaturationNotMet();
   await testRunawayValve();
   await testReferenceContinue();
+  await testContinuityOverKeyword();
   testSlashLabelGuard();
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
