@@ -87,7 +87,7 @@ check() {
 }
 check "classifier — zero-overlap rule" "KEYWORD_MATURITY" "$DST/classifier.js"
 check "commands — /new resets keywords" 'keywords = \[\]' "$DST/commands.js"
-check "index — mimo-v2.5-mit model" "mimo-v2.5-mit" "/app/dist/extensions/topic-router/index.js"
+check "llm-client — mimo-v2.5-mit model" "mimo-v2.5-mit" "$DST/llm-client.js"
 check "hook-handler — session routing" "sessionKey" "$DST/hook-handler.js"
 check "v4 — feedback-store" "adaptThresholds" "$DST/feedback-store.js"
 check "v4 — context-bridge" "checkMerge" "$DST/context-bridge.js"
