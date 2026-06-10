@@ -35,7 +35,7 @@ function assert(cond: boolean, msg: string) {
 
 const noop = () => {};
 
-function mkParams(content: string, registry: TopicRegistry, sessionKey = 'agent:main:main') {
+function mkParams(content: string, registry: TopicRegistry, sessionKey = 'agent:main:main', log = noop) {
   return {
     event: { cleanedBody: content, sessionKey },
     ctx: { sessionKey },
@@ -43,8 +43,12 @@ function mkParams(content: string, registry: TopicRegistry, sessionKey = 'agent:
     config,
     stateDir: STATE_DIR,
     classifierLlmConfig: { apiKey: '' }, // no key -> rules-only, no LLM call
-    log: noop,
+    log,
   };
+}
+
+function isHandled(result: Awaited<ReturnType<typeof handleBeforeDispatch>>): boolean {
+  return result?.handled === true;
 }
 
 async function testGatewayCommandPassthrough() {
@@ -62,7 +66,7 @@ async function testGatewayCommandPassthrough() {
   resetState();
   const reg2 = new TopicRegistry(STATE_DIR);
   const r2 = await handleBeforeDispatch(mkParams('/newtopic mytopic', reg2));
-  assert(r2 !== undefined && (r2 as any).handled === true, `/newtopic -> handled by plugin (got ${JSON.stringify(r2)})`);
+  assert(isHandled(r2), `/newtopic -> handled by plugin (got ${JSON.stringify(r2)})`);
 }
 
 async function testSameSessionSerialized() {
@@ -70,17 +74,22 @@ async function testSameSessionSerialized() {
   console.log('\n=== §5: same-session concurrent messages serialize ===');
   resetState();
   const registry = new TopicRegistry(STATE_DIR);
+  const logs: string[] = [];
+  const log = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
 
-  const p1 = handleBeforeDispatch(mkParams('帮我看看这段 python 代码怎么调试', registry));
-  const p2 = handleBeforeDispatch(mkParams('今天北京的天气怎么样适合穿什么', registry));
+  const p1 = handleBeforeDispatch(mkParams('帮我看看这段 python 代码怎么调试', registry, 'agent:main:main', log));
+  const p2 = handleBeforeDispatch(mkParams('今天北京的天气怎么样适合穿什么', registry, 'agent:main:main', log));
   await Promise.all([p1, p2]);
 
   const active = registry.getActive();
   assert(active !== null, `after concurrent run, an active topic exists (got ${active})`);
   const raw = fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8');
-  let parsed: any = null;
+  let parsed: unknown = null;
   try { parsed = JSON.parse(raw); } catch {}
-  assert(parsed !== null && typeof parsed.topics === 'object', 'registry file is valid JSON after concurrent run');
+  assert(parsed !== null && typeof parsed === 'object' && 'topics' in parsed && typeof parsed.topics === 'object', 'registry file is valid JSON after concurrent run');
+  const firstRoute = logs.findIndex(line => line.includes('Routing to topic session'));
+  const secondStart = logs.findIndex(line => line.includes('content="今天北京的天气'));
+  assert(firstRoute >= 0 && secondStart > firstRoute, `second same-session handler starts after first routed (firstRoute=${firstRoute}, secondStart=${secondStart})`);
 }
 
 async function testDifferentSessionsIndependent() {
@@ -88,8 +97,8 @@ async function testDifferentSessionsIndependent() {
   console.log('\n=== §5: concurrent calls resolve without deadlock ===');
   resetState();
   const registry = new TopicRegistry(STATE_DIR);
-  const a = handleBeforeDispatch(mkParams('帮我看看 python 代码', registry, 'agent:main:main'));
-  const b = handleBeforeDispatch(mkParams('python 报错怎么修', registry, 'agent:main:main'));
+  const a = handleBeforeDispatch(mkParams('帮我看看 python 代码', registry, 'agent:main:feishu:direct:user-a'));
+  const b = handleBeforeDispatch(mkParams('python 报错怎么修', registry, 'agent:main:feishu:direct:user-b'));
   const [ra, rb] = await Promise.all([a, b]);
   assert(true, `both calls resolved without deadlock (a=${ra ? 'routed' : 'passthrough'}, b=${rb ? 'routed' : 'passthrough'})`);
 }
