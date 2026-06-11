@@ -77,16 +77,46 @@ TARBALL_URL="${REPO_URL%.git}/archive/refs/heads/${BRANCH}.tar.gz"
 fetch_via_tarball() {
   echo "  Trying tarball download..."
   local tmp="/tmp/topic-router-$$.tar.gz"
+  local extract="/tmp/topic-router-extract-$$"
   if curl -fsSL --connect-timeout 10 -o "$tmp" "$TARBALL_URL" 2>/dev/null \
      || wget -q --timeout=10 -O "$tmp" "$TARBALL_URL" 2>/dev/null; then
-    rm -rf "$REPO_DIR"
+    # Extract to a temp dir and overlay onto REPO_DIR. The old `rm -rf "$REPO_DIR"`
+    # destroyed the git repo (→ "HEAD: tarball (no git history)"), and if the
+    # caller's shell was cwd'd inside REPO_DIR it also triggered "getcwd: cannot
+    # access parent directories". Worse, once .git was gone every later `git fetch`
+    # failed and fell back to tarball again — a self-perpetuating loop. Overlaying
+    # keeps an existing .git intact; if there's none yet (fresh container) we init
+    # one below. Either way the result is a working git repo for redeploy/git fetch.
+    rm -rf "$extract"; mkdir -p "$extract"
+    if ! tar xzf "$tmp" -C "$extract" --strip-components=1 2>/dev/null; then
+      rm -rf "$tmp" "$extract"; return 1
+    fi
     mkdir -p "$REPO_DIR"
-    tar xzf "$tmp" -C "$REPO_DIR" --strip-components=1
-    rm -f "$tmp"
-    echo "  ✓ Downloaded via tarball"
+    if command -v rsync >/dev/null 2>&1; then
+      # Copy everything except .git; don't delete extra files (keep state dirs etc).
+      rsync -a --exclude='.git' "$extract"/ "$REPO_DIR"/
+    else
+      # No rsync: tarball has no .git so cp -a won't clobber REPO_DIR/.git.
+      cp -a "$extract"/. "$REPO_DIR"/ 2>/dev/null
+    fi
+    rm -rf "$tmp" "$extract"
+    # The tarball has no .git. If REPO_DIR isn't a git repo yet (fresh container,
+    # or an earlier destructive run wiped it), initialize one and wire up the
+    # remote, so a later `git fetch`/redeploy.sh can work instead of being stuck
+    # on tarball forever. Best-effort: a non-git fallback still runs, just without
+    # incremental updates.
+    if [ ! -d "$REPO_DIR/.git" ]; then
+      ( cd "$REPO_DIR" \
+        && git init -q 2>/dev/null \
+        && git remote add origin "$REPO_URL" 2>/dev/null \
+        && git config --add safe.directory "$REPO_DIR" 2>/dev/null ) || true
+      echo "  ✓ Downloaded via tarball (initialized git repo for future updates)"
+    else
+      echo "  ✓ Downloaded via tarball (preserved existing .git)"
+    fi
     return 0
   fi
-  rm -f "$tmp"
+  rm -f "$tmp"; rm -rf "$extract"
   return 1
 }
 
@@ -103,8 +133,11 @@ if [ -d "$REPO_DIR/.git" ]; then
     git reset --hard "origin/$BRANCH" 2>/dev/null || true
   fi
 elif [ -d "$REPO_DIR" ]; then
-  # Directory exists but not a git repo (e.g. leftover tarball extract)
+  # Directory exists but not a git repo (e.g. leftover from the old destructive
+  # tarball path). Re-clone cleanly. cd out first so removing REPO_DIR can't strand
+  # the shell's cwd ("getcwd: cannot access parent directories").
   echo "  Directory exists (no .git), re-cloning..."
+  cd / 2>/dev/null || true
   rm -rf "$REPO_DIR"
   mkdir -p "$(dirname "$REPO_DIR")"
   if ! timeout 30 git clone -b "$BRANCH" "$REPO_URL" "$REPO_DIR" 2>/dev/null; then
