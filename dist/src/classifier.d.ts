@@ -20,6 +20,7 @@ export interface ClassifyOptions {
 export declare function parseExplicitCommand(content: string): ClassifyResult | null;
 export declare function matchKeywords(content: string, topics: TopicEntry[]): ClassifyResult | null;
 export declare function detectContinuation(content: string, _recentMessages: string[], activeTopic: TopicEntry | null): ClassifyResult | null;
+export declare function detectShortFollowUp(content: string, activeTopic: TopicEntry | null, recentlyActive: boolean): ClassifyResult | null;
 export declare function isLLMCircuitOpen(): boolean;
 export declare function classify(content: string, recentMessages: string[], registry: TopicRegistry, config: TopicRouterConfig, llmConfig?: LLMConfig, log?: (...args: unknown[]) => void): Promise<ClassifyResult>;
 export declare function generateTopicLabel(content: string): string;

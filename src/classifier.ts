@@ -188,6 +188,31 @@ export function detectContinuation(
   return null;
 }
 
+export function detectShortFollowUp(
+  content: string,
+  activeTopic: TopicEntry | null,
+  recentlyActive: boolean
+): ClassifyResult | null {
+  if (!activeTopic || !recentlyActive) return null;
+
+  const normalized = content.toLowerCase().trim();
+  if (!normalized || normalized.startsWith('/')) return null;
+
+  const hasSwitchSignal = SWITCH_SIGNALS.some(s => normalized.includes(s.toLowerCase()));
+  if (hasSwitchSignal) return null;
+
+  if (normalized.length <= 8 && /[呢哪吗么呀啊吧？?]$/.test(normalized)) {
+    return {
+      action: 'continue',
+      targetLabel: activeTopic.label,
+      confidence: 0.82,
+      reason: `Short follow-up fragment, staying on "${activeTopic.label}"`,
+    };
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // LLM-based classification (with circuit breaker)
 // ---------------------------------------------------------------------------
@@ -452,6 +477,11 @@ export async function classify(
   const continuationResult = detectContinuation(content, recentMessages, activeTopic);
   if (continuationResult && continuationResult.confidence >= effectiveConfig.classifier.confidenceThreshold) {
     return continuationResult;
+  }
+
+  const shortFollowUpResult = detectShortFollowUp(content, activeTopic, recentlyActive);
+  if (shortFollowUpResult && shortFollowUpResult.confidence >= effectiveConfig.classifier.confidenceThreshold) {
+    return shortFollowUpResult;
   }
 
   // L1.5: Auto-new checks (before LLM fallback)

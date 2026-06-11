@@ -5,6 +5,7 @@
 
 import { classify, parseExplicitCommand, matchKeywords, detectContinuation, generateTopicLabel } from './src/classifier.js';
 import { TopicRegistry } from './src/topic-registry.js';
+import { handleBeforeDispatch } from './src/hook-handler.js';
 import fs from 'node:fs';
 
 const STATE_DIR = '/tmp/topic-router-test-state';
@@ -42,11 +43,11 @@ async function testL0() {
   let r = parseExplicitCommand('/switch coding');
   assert(r?.action === 'switch' && r.targetLabel === 'coding', '/switch coding → switch, label=coding');
 
-  r = parseExplicitCommand('/new my-topic');
-  assert(r?.action === 'new' && r.targetLabel === 'my-topic', '/new my-topic → new, label=my-topic');
+  r = parseExplicitCommand('/newtopic my-topic');
+  assert(r?.action === 'new' && r.targetLabel === 'my-topic', '/newtopic my-topic → new, label=my-topic');
 
-  r = parseExplicitCommand('/new');
-  assert(r?.action === 'new' && r.targetLabel === null, '/new → new, label=null');
+  r = parseExplicitCommand('/newtopic');
+  assert(r?.action === 'new' && r.targetLabel === null, '/newtopic → new, label=null');
 
   r = parseExplicitCommand('/end');
   assert(r?.action === 'passthrough', '/end → passthrough');
@@ -64,7 +65,7 @@ async function testNoTopics() {
   const registry = new TopicRegistry(STATE_DIR);
 
   const r = await classify('Redis和Memcached有什么区别？', [], registry, config);
-  assert(r.action === 'passthrough', `No topics, substantial message → passthrough (got ${r.action})`);
+  assert(r.action === 'new', `No topics, substantial message → new (got ${r.action})`);
 
   const r2 = await classify('嗯', [], registry, config);
   assert(r2.action === 'passthrough', `No topics, short message → passthrough (got ${r2.action})`);
@@ -202,14 +203,14 @@ async function testSaturationNotMet() {
   const r = await classify('明天天气怎么样啊？', [], registry, config);
   assert(r.action === 'continue', `Fresh topic (1 msg) + unrelated → continue (got ${r.action})`);
 
-  // Simulate many msgs but recent activity
+  // Simulate a not-yet-runaway topic with recent activity
   const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
-  data.topics['coding'].messageCount = 15;
-  data.topics['coding'].lastActiveAt = Date.now() - 5 * 60 * 1000; // 5 min ago
+  data.topics['coding'].messageCount = 14;
+  data.topics['coding'].lastActiveAt = Date.now() - 2 * 60 * 1000; // 2 min ago
   fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
 
   const r2 = await classify('明天天气怎么样啊？', [], registry, config);
-  assert(r2.action === 'continue', `High msgs but recent (5min) → continue (got ${r2.action})`);
+  assert(r2.action === 'continue', `Below runaway threshold + recent (2min) → continue (got ${r2.action})`);
 }
 
 async function testRunawayValve() {
@@ -326,6 +327,62 @@ async function testContinuityOverKeyword() {
     `Not recentlyActive → L1 keyword switch fires (got ${r2.action}/${r2.targetLabel})`);
 }
 
+async function testShortFollowUpFragment() {
+  console.log('\n=== Short Follow-up Fragment ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('weather', '今天的天气怎么样');
+  registry.setKeywords('weather', ['天气', '温度', '湿度']);
+
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['weather'].messageCount = 2;
+  data.topics['weather'].lastActiveAt = Date.now() - 30 * 1000;
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  const r = await classify('郑州哪', [], registry, config);
+  assert(r.action === 'continue' && r.targetLabel === 'weather',
+    `Recent short fragment "郑州哪" → continue weather (got ${r.action}/${r.targetLabel})`);
+}
+
+async function testHookPassthroughAndShortFollowUp() {
+  console.log('\n=== Hook: Gateway Commands + Short Follow-up ===');
+  resetState();
+  const commandRegistry = new TopicRegistry(STATE_DIR);
+  const baseParams = {
+    registry: commandRegistry,
+    config,
+    stateDir: STATE_DIR,
+    classifierLlmConfig: {},
+    log: () => {},
+  };
+
+  const newResult = await handleBeforeDispatch({
+    ...baseParams,
+    event: { cleanedBody: '/NEW', sessionKey: config.targetSessionKey },
+    ctx: { sessionKey: config.targetSessionKey },
+  });
+  assert(newResult === undefined, '/NEW gateway command → passthrough');
+  assert(commandRegistry.getAll().length === 0, '/NEW gateway command → no topic created');
+
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('weather', '今天的天气怎么样');
+  registry.setKeywords('weather', ['天气', '温度', '湿度']);
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['weather'].messageCount = 2;
+  data.topics['weather'].lastActiveAt = Date.now() - 30 * 1000;
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  const result = await handleBeforeDispatch({
+    ...baseParams,
+    registry,
+    event: { cleanedBody: '郑州哪', sessionKey: 'agent:main:main:hook-short' },
+    ctx: { sessionKey: config.targetSessionKey },
+  });
+  assert(result?.handled === false, 'Short follow-up hook lets gateway continue');
+  assert(result?.sessionKey !== config.targetSessionKey && result?.sessionKey?.includes(':weather') === true,
+    `Short follow-up hook routes to weather session (got ${result?.sessionKey})`);
+}
+
 function testSlashLabelGuard() {
   // §3b defense-in-depth: generateTopicLabel must NOT hash slash-command text into a
   // per-command junk label (the "/NEW (vnxt)" pollution). Any "/"-prefixed content
@@ -352,6 +409,8 @@ async function main() {
   await testRunawayValve();
   await testReferenceContinue();
   await testContinuityOverKeyword();
+  await testShortFollowUpFragment();
+  await testHookPassthroughAndShortFollowUp();
   testSlashLabelGuard();
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
