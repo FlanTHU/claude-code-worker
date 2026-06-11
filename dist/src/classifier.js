@@ -176,15 +176,40 @@ const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=
 - 应 continue：消息是当前话题这个多步任务链里的中间步骤（如当前在"整理日报"，"搜一下张三"是为日报查人）。即便它字面是个独立祈使句，只要在为当前话题的目标服务，就 continue。
 - 应 new/switch：消息与当前话题的目标/主题无关，只是碰巧在同一会话里连续出现。即便用户在连续提一串独立请求，每条之间没有共同目标，也要各自判 new/switch。绝不能因为"用户在连续提问"或"延续了提独立请求的模式"就判 continue——那是把时间相邻误当语义关联。
 （例：当前话题是"武汉天气"，接着用户问"我名下有哪些IT资产"→这是 new，不是天气话题的延续；再问"把这句翻译成日语"→还是 new。它们只是连续，彼此和天气都无关。）
+每个话题标了"最近活跃"（如 刚活跃/8分钟前/2小时前）。已经冷掉很久（如数十分钟/数小时前）、且关键词杂糅多个领域的话题，往往是早前堆积的旧话题，不要硬把新消息并进去——除非新消息语义上明确属于它。
 拿不准时，先看语义是否相关：相关但不确定归属 → continue；无明显语义关联 → new。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
+/** Human-readable idle duration for the LLM topic summary (e.g. "刚活跃"/"8分钟前"/"2小时前"). */
+function formatIdle(ms) {
+    const min = Math.floor(ms / 60000);
+    if (min < 1)
+        return '刚活跃';
+    if (min < 60)
+        return `${min}分钟前`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24)
+        return `${hr}小时前`;
+    return `${Math.floor(hr / 24)}天前`;
+}
 async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
     const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
     const model = llmConfig.model ?? DEFAULT_MODEL;
     const url = `${baseUrl}/chat/completions`;
-    const topicSummary = allTopics.map(t => {
+    // Annotate each topic with how long ago it was last active, and list most-recent
+    // first. Without this, a stale "super-topic" that earlier swallowed a mix of
+    // unrelated messages (e.g. TC-031: 22c4xk with 16 msgs spanning 日程/翻译/定时任务)
+    // sits in the candidate list with no signal that it's gone cold — so the LLM keeps
+    // "finding" a link and continues unrelated new messages into it. The idle label gives
+    // the system-prompt's "时间相邻≠语义关联" rule the data to reject a cold topic. A
+    // genuinely live chain (TC-023) is unaffected: its topic shows "刚活跃".
+    const now = Date.now();
+    const topicSummary = allTopics
+        .slice()
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+        .map(t => {
         const isActive = t.label === activeTopic?.label ? ' [当前活跃]' : '';
+        const idle = formatIdle(now - t.lastActiveAt);
         const kws = t.keywords.slice(0, 8).join(', ');
-        return `- ${t.label} (${t.displayName})${isActive}: 关键词=[${kws}], ${t.messageCount}条消息`;
+        return `- ${t.label} (${t.displayName})${isActive}: 最近活跃=${idle}, 关键词=[${kws}], ${t.messageCount}条消息`;
     }).join('\n');
     // Feed the full recent-message window (hook-handler tracks 5) with a wider per-line
     // cap. The old slice(-3)/60-char truncation starved the LLM of the task-chain context
