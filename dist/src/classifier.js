@@ -172,8 +172,11 @@ function recordLLMSuccess() {
     llmCircuitOpenUntil = 0;
 }
 const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=属于当前话题，switch=属于另一个已有话题，new=与所有已有话题都无关。
-注意：一条消息即便字面上是独立的祈使句（如"搜一下张三""读今天日程"），也可能是当前话题这个多步任务链里的中间步骤（如"搜张三"是为后面写日报而查人）。判断时结合最近消息看它是不是在为当前话题服务，是则 continue，不要因为它单独看像个新请求就判 new。
-不确定选continue。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
+判断依据是【语义关联】，不是【时间相邻】。核心问题：这条消息在主题/目标上是否真的属于当前话题，而不是"它恰好是同一会话里连续发来的下一条"。
+- 应 continue：消息是当前话题这个多步任务链里的中间步骤（如当前在"整理日报"，"搜一下张三"是为日报查人）。即便它字面是个独立祈使句，只要在为当前话题的目标服务，就 continue。
+- 应 new/switch：消息与当前话题的目标/主题无关，只是碰巧在同一会话里连续出现。即便用户在连续提一串独立请求，每条之间没有共同目标，也要各自判 new/switch。绝不能因为"用户在连续提问"或"延续了提独立请求的模式"就判 continue——那是把时间相邻误当语义关联。
+（例：当前话题是"武汉天气"，接着用户问"我名下有哪些IT资产"→这是 new，不是天气话题的延续；再问"把这句翻译成日语"→还是 new。它们只是连续，彼此和天气都无关。）
+拿不准时，先看语义是否相关：相关但不确定归属 → continue；无明显语义关联 → new。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 async function classifyWithLLM(content, activeTopic, allTopics, recentMessages, llmConfig, log) {
     const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
     const model = llmConfig.model ?? DEFAULT_MODEL;
