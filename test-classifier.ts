@@ -383,6 +383,32 @@ async function testHookPassthroughAndShortFollowUp() {
     `Short follow-up hook routes to weather session (got ${result?.sessionKey})`);
 }
 
+async function testExpireStaleInactive() {
+  // 24h auto-end: inactive topics idle past the window become 'ended' (dropped from
+  // candidate pool); active and not-yet-stale topics are untouched.
+  console.log('\n=== Auto-end stale inactive topics ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('fresh', '近期话题');
+  registry.getOrCreate('stale', '陈旧话题');
+  registry.getOrCreate('live', '当前话题');
+  registry.setActive('live'); // fresh+stale become inactive, live is active
+
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['stale'].lastActiveAt = Date.now() - 25 * 3600 * 1000; // 25h ago
+  data.topics['fresh'].lastActiveAt = Date.now() - 1 * 3600 * 1000;  // 1h ago
+  data.topics['live'].lastActiveAt = Date.now() - 25 * 3600 * 1000;  // old but ACTIVE
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  const ended = registry.expireStaleInactive(24 * 3600 * 1000);
+  assert(ended === 1, `Only the stale inactive topic ended (got ${ended})`);
+
+  const raw = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8')).topics;
+  assert(raw['stale'].status === 'ended', `stale → ended (got ${raw['stale'].status})`);
+  assert(raw['fresh'].status === 'inactive', `fresh (1h) stays inactive (got ${raw['fresh'].status})`);
+  assert(raw['live'].status === 'active', `live stays active despite 25h idle (got ${raw['live'].status})`);
+}
+
 function testSlashLabelGuard() {
   // §3b defense-in-depth: generateTopicLabel must NOT hash slash-command text into a
   // per-command junk label (the "/NEW (vnxt)" pollution). Any "/"-prefixed content
@@ -409,6 +435,7 @@ async function main() {
   await testRunawayValve();
   await testReferenceContinue();
   await testContinuityOverKeyword();
+  await testExpireStaleInactive();
   await testShortFollowUpFragment();
   await testHookPassthroughAndShortFollowUp();
   testSlashLabelGuard();

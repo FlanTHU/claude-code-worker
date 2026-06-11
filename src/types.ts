@@ -42,6 +42,10 @@ export interface TopicRouterConfig {
   };
   maxTopics: number;
   pruneAfterHours: number;
+  /** Inactive topics idle longer than this are auto-ended (removed from the
+   *  classifier candidate pool). Defaults to 24h when unset. `prune` still
+   *  physically removes them later per pruneAfterHours. */
+  inactiveExpireHours?: number;
   replyFooter: boolean;
   targetSessionKey: string;
   v4?: V4Config;

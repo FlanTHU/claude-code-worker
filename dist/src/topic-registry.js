@@ -175,6 +175,28 @@ export class TopicRegistry {
         }
         this.save();
     }
+    /**
+     * Auto-end inactive topics idle longer than maxIdleMs. Returns the count ended.
+     * Only touches 'inactive' topics — 'active' has no idle concept (it stays active
+     * until another topic is activated), and 'ended' is already terminal. Ending (not
+     * deleting) keeps the object around for `prune` to physically remove later, and
+     * removes it from the classifier's candidate pool (all candidate filters drop
+     * status==='ended'), so a long-cold topic stops being a switch target.
+     */
+    expireStaleInactive(maxIdleMs) {
+        this.reload();
+        const cutoff = Date.now() - maxIdleMs;
+        let ended = 0;
+        for (const entry of Object.values(this.data.topics)) {
+            if (entry.status === 'inactive' && entry.lastActiveAt < cutoff) {
+                entry.status = 'ended';
+                ended++;
+            }
+        }
+        if (ended > 0)
+            this.save();
+        return ended;
+    }
     setKeywords(label, keywords) {
         const normalized = this.normalizeLabel(label);
         this.reload();

@@ -338,6 +338,13 @@ ${recentCtx}
 export async function classify(content, recentMessages, registry, config, llmConfig, log) {
     const noop = () => { };
     const _log = log ?? noop;
+    // Auto-end inactive topics idle past the configured window (default 24h) before
+    // reading the candidate pool, so long-cold topics stop being switch targets and
+    // don't accumulate indefinitely. Cheap in-memory scan; persists only if any ended.
+    const expireHours = config.inactiveExpireHours ?? 24;
+    const expired = registry.expireStaleInactive(expireHours * 3600 * 1000);
+    if (expired > 0)
+        _log(`[classifier] Auto-ended ${expired} stale inactive topic(s) (idle > ${expireHours}h)`);
     const allTopics = registry.getAll();
     const activeTopic = registry.getActive();
     // L0: Explicit commands (highest priority)

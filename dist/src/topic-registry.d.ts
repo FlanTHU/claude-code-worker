@@ -35,6 +35,15 @@ export declare class TopicRegistry {
     setActive(label: string): TopicEntry | undefined;
     markInactive(label: string): void;
     markEnded(label: string): void;
+    /**
+     * Auto-end inactive topics idle longer than maxIdleMs. Returns the count ended.
+     * Only touches 'inactive' topics — 'active' has no idle concept (it stays active
+     * until another topic is activated), and 'ended' is already terminal. Ending (not
+     * deleting) keeps the object around for `prune` to physically remove later, and
+     * removes it from the classifier's candidate pool (all candidate filters drop
+     * status==='ended'), so a long-cold topic stops being a switch target.
+     */
+    expireStaleInactive(maxIdleMs: number): number;
     setKeywords(label: string, keywords: string[]): void;
     learnKeywords(label: string, content: string): void;
     updateDisplayName(label: string, displayName: string): void;
