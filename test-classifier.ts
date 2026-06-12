@@ -6,6 +6,7 @@
 import { classify, parseExplicitCommand, matchKeywords, detectContinuation, generateTopicLabel } from './src/classifier.js';
 import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch, deriveDisplayNameFallback } from './src/hook-handler.js';
+import { FeedbackStore } from './src/feedback-store.js';
 import fs from 'node:fs';
 
 const STATE_DIR = '/tmp/topic-router-test-state';
@@ -432,6 +433,32 @@ function testFallbackName() {
   }
 }
 
+function testFeedbackStore() {
+  console.log('\n=== FeedbackStore: sessionKey 隔离 + 正向信号顺序 ===');
+  resetState();
+  const store = new FeedbackStore(STATE_DIR);
+
+  // sessionKey 隔离:A 的路由不该被 B 读到
+  store.setLastRoute('sessA', { timestamp: Date.now(), topic: 'coding', action: 'continue', confidence: 0.8, layer: 'L2' });
+  store.setLastRoute('sessB', { timestamp: Date.now(), topic: 'weather', action: 'new', confidence: 0.7, layer: 'L1.5' });
+  assert(store.getLastRoute('sessA')?.topic === 'coding', `sessA 拿到自己的 coding (got ${store.getLastRoute('sessA')?.topic})`);
+  assert(store.getLastRoute('sessB')?.topic === 'weather', `sessB 拿到自己的 weather (got ${store.getLastRoute('sessB')?.topic})`);
+  assert(store.getLastRoute('sessC') === null, `未知 session 返回 null`);
+
+  // 正向信号 bug 回归:模拟 hook 修复后的顺序(先 get 旧值判定、再 set 新值)。
+  // 第一条 continue 到 coding 时,prevRoute 应为 null(没上一条)→ 不该记正向。
+  resetState();
+  const store2 = new FeedbackStore(STATE_DIR);
+  const before = store2.getStats().correctRoutes;
+  const prev1 = store2.getLastRoute('s');           // null
+  assert(prev1 === null, `首条无 prevRoute`);
+  store2.setLastRoute('s', { timestamp: Date.now(), topic: 'coding', action: 'continue', confidence: 0.8, layer: 'L2' });
+  // 第二条又 continue 到 coding:prevRoute 现在是 coding,才算真正"留存"
+  const prev2 = store2.getLastRoute('s');
+  assert(prev2?.topic === 'coding', `第二条能读到上一条 coding`);
+  assert(store2.getStats().correctRoutes === before, `仅 get/set 不应改变 correctRoutes(修复前的 bug 会让它虚增)`);
+}
+
 function testSlashLabelGuard() {
   // §3b defense-in-depth: generateTopicLabel must NOT hash slash-command text into a
   // per-command junk label (the "/NEW (vnxt)" pollution). Any "/"-prefixed content
@@ -460,6 +487,7 @@ async function main() {
   await testContinuityOverKeyword();
   await testExpireStaleInactive();
   testFallbackName();
+  testFeedbackStore();
   await testShortFollowUpFragment();
   await testHookPassthroughAndShortFollowUp();
   testSlashLabelGuard();

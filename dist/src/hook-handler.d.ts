@@ -11,6 +11,7 @@ export interface RecentAutoNew {
 }
 export declare function getRecentAutoNew(sessionKey: string): RecentAutoNew | null;
 export declare function clearRecentAutoNew(sessionKey: string): void;
+export declare function deriveDisplayNameFallback(content: string): string;
 /**
  * Session routing approach:
  * - Classify message → determine topic

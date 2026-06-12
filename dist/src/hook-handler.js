@@ -298,7 +298,7 @@ async function handleBeforeDispatchInner(params) {
         return undefined;
     }
     if (/^\/(topics|switch|newtopic|endall|end)\b/i.test(trimmed)) {
-        const cmdResult = await tryHandleCommand(content, registry, config, log, feedbackStore, contextBridge);
+        const cmdResult = await tryHandleCommand(content, registry, config, log, feedbackStore, contextBridge, sessionKey);
         if (cmdResult)
             return cmdResult;
         return undefined;
@@ -342,16 +342,11 @@ async function handleBeforeDispatchInner(params) {
     }
     // ── V4: Track route for feedback detection ──
     if (feedbackStore && config.v4?.feedback?.enabled && result.action !== 'passthrough') {
-        const lastRoute = {
-            timestamp: Date.now(),
-            topic: result.targetLabel ?? '',
-            action: result.action,
-            confidence: result.confidence,
-            layer: result.layer ?? result.reason.split(':')[0] ?? 'unknown',
-        };
-        feedbackStore.setLastRoute(lastRoute);
-        // Positive signal: user continued in previously routed topic
-        const prevRoute = feedbackStore.getLastRoute();
+        // Positive signal: the user is continuing in the topic they were routed to
+        // LAST time. Must read the PREVIOUS route (before overwriting it) — reading
+        // after setLastRoute would compare the current route against itself and fire
+        // on every continue, inflating correctRoutes and starving errorRate.
+        const prevRoute = feedbackStore.getLastRoute(sessionKey);
         if (prevRoute && result.action === 'continue' && result.targetLabel === prevRoute.topic) {
             const elapsed = Date.now() - prevRoute.timestamp;
             if (elapsed < 300_000) {
@@ -364,6 +359,15 @@ async function handleBeforeDispatchInner(params) {
                 });
             }
         }
+        // Now record THIS route as the new "last route" for next time.
+        const lastRoute = {
+            timestamp: Date.now(),
+            topic: result.targetLabel ?? '',
+            action: result.action,
+            confidence: result.confidence,
+            layer: result.layer ?? result.reason.split(':')[0] ?? 'unknown',
+        };
+        feedbackStore.setLastRoute(sessionKey, lastRoute);
     }
     const updated = [...recentMessages, content].slice(-RECENT_MESSAGE_WINDOW);
     recentMessagesBySession.set(sessionKey, updated);

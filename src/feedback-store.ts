@@ -11,7 +11,11 @@ import type {
 const MAX_EVENTS = 200;
 const ADAPT_INTERVAL = 20;
 
-const DEFAULT_THRESHOLDS: AdaptiveThresholds = {
+/** Single source of truth for default thresholds. Exported so the classifier can
+ *  use the SAME defaults when no adaptive value is injected — otherwise toggling
+ *  self-learning on/off would step the saturation thresholds (classifier used to
+ *  fall back to 10min/5 while this default is 5min/3). */
+export const DEFAULT_THRESHOLDS: AdaptiveThresholds = {
   confidenceThreshold: 0.6,
   saturationMessageCount: 3,
   saturationIdleMinutes: 5,
@@ -20,14 +24,20 @@ const DEFAULT_THRESHOLDS: AdaptiveThresholds = {
   lastAdjustedAt: 0,
 };
 
+type Logger = (...args: unknown[]) => void;
+
 export class FeedbackStore {
   private filePath: string;
   private data: FeedbackStoreData;
-  private lastRouteInfo: LastRouteInfo | null = null;
-  private eventsSinceAdapt = 0;
+  // Last auto-route keyed by INBOUND sessionKey. A single shared slot let one
+  // session's route clobber another's, so a /switch in session A could be
+  // attributed to session B's route (wrong fromTopic). Keyed map fixes that.
+  private lastRouteBySession = new Map<string, LastRouteInfo>();
+  private log: Logger;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, log?: Logger) {
     this.filePath = path.join(stateDir, 'feedback-data.json');
+    this.log = log ?? (() => {});
     this.data = this.load();
   }
 
@@ -40,6 +50,7 @@ export class FeedbackStore {
         events: [],
         thresholds: { ...DEFAULT_THRESHOLDS },
         stats: { totalRoutes: 0, correctRoutes: 0, corrections: 0, missedNewTopics: 0 },
+        lastAdaptedEventCount: 0,
       };
     }
   }
@@ -58,12 +69,12 @@ export class FeedbackStore {
     return this.data.stats;
   }
 
-  setLastRoute(info: LastRouteInfo): void {
-    this.lastRouteInfo = info;
+  setLastRoute(sessionKey: string, info: LastRouteInfo): void {
+    this.lastRouteBySession.set(sessionKey, info);
   }
 
-  getLastRoute(): LastRouteInfo | null {
-    return this.lastRouteInfo;
+  getLastRoute(sessionKey: string): LastRouteInfo | null {
+    return this.lastRouteBySession.get(sessionKey) ?? null;
   }
 
   record(signal: FeedbackSignal, metadata: Omit<FeedbackEvent, 'timestamp' | 'signal'>): void {
@@ -88,10 +99,15 @@ export class FeedbackStore {
     }
     this.data.stats.totalRoutes++;
 
-    this.eventsSinceAdapt++;
-    if (this.eventsSinceAdapt >= ADAPT_INTERVAL) {
+    // Adapt cadence uses a persisted counter (lastAdaptedEventCount) compared to
+    // the lifetime event count, so restarts don't reset progress toward the next
+    // adapt. Lifetime count = events seen; we track it via stats.totalRoutes which
+    // is monotonic. Trigger when enough new events accumulated since last adapt.
+    const seen = this.data.stats.totalRoutes;
+    const since = seen - (this.data.lastAdaptedEventCount ?? 0);
+    if (since >= ADAPT_INTERVAL) {
       this.adaptThresholds();
-      this.eventsSinceAdapt = 0;
+      this.data.lastAdaptedEventCount = seen;
     }
 
     this.save();
@@ -109,6 +125,7 @@ export class FeedbackStore {
     const errorRate = (misroutes + missedNew) / total;
 
     const t = this.data.thresholds;
+    const before = { ...t };
 
     if (errorRate > 0.3) {
       t.confidenceThreshold = Math.min(t.confidenceThreshold + 0.03, 0.85);
@@ -125,6 +142,23 @@ export class FeedbackStore {
     }
 
     t.lastAdjustedAt = Date.now();
+
+    // Surface what self-learning actually did — otherwise thresholds drift
+    // silently and there's no way to tell if learning is working / oscillating.
+    const changed =
+      before.confidenceThreshold !== t.confidenceThreshold ||
+      before.hintThresholdHigh !== t.hintThresholdHigh ||
+      before.saturationMessageCount !== t.saturationMessageCount;
+    if (changed) {
+      this.log(
+        `[v4-adapt] errorRate=${errorRate.toFixed(2)} (misroute=${misroutes} missedNew=${missedNew} /${total}) → ` +
+        `conf ${before.confidenceThreshold}→${t.confidenceThreshold}, ` +
+        `hintHigh ${before.hintThresholdHigh}→${t.hintThresholdHigh}, ` +
+        `satMsg ${before.saturationMessageCount}→${t.saturationMessageCount}`
+      );
+    } else {
+      this.log(`[v4-adapt] errorRate=${errorRate.toFixed(2)} (n=${total}), no threshold change`);
+    }
     this.save();
   }
 }

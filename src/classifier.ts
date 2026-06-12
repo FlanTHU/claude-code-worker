@@ -12,6 +12,9 @@ import type { TopicRegistry } from './topic-registry.js';
 import { STOPWORDS } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './llm-client.js';
+// Single source of default thresholds — used when no adaptive value is injected,
+// so toggling self-learning on/off doesn't step the saturation thresholds.
+import { DEFAULT_THRESHOLDS } from './feedback-store.js';
 
 /**
  * Does message `msg` (already lowercased) overlap topic keyword `kw`?
@@ -512,8 +515,8 @@ export async function classify(
     // Rule A: Saturation — topic has many messages + idle for a while + unrelated.
     // V4: thresholds come from feedback-store adaptive values when present, else defaults.
     const adaptive = config._adaptiveThresholds;
-    const IDLE_THRESHOLD = (adaptive?.saturationIdleMinutes ?? 10) * 60 * 1000;
-    const MSG_THRESHOLD = adaptive?.saturationMessageCount ?? 5;
+    const IDLE_THRESHOLD = (adaptive?.saturationIdleMinutes ?? DEFAULT_THRESHOLDS.saturationIdleMinutes) * 60 * 1000;
+    const MSG_THRESHOLD = adaptive?.saturationMessageCount ?? DEFAULT_THRESHOLDS.saturationMessageCount;
     if (activeTopic.messageCount >= MSG_THRESHOLD && idleMs >= IDLE_THRESHOLD && !hasKeywordOverlap && isSubstantial) {
       _log(`[classifier] Auto-new (saturation): msgs=${activeTopic.messageCount}, idle=${Math.round(idleMs / 60000)}min`);
       return {
@@ -639,7 +642,7 @@ export async function classify(
     // (well above any real on-topic chat or that loop) so only a genuinely ballooning
     // topic forks, and still require zero overlap with EVERY active topic + substantial.
     const adaptive = config._adaptiveThresholds;
-    const saturationCount = adaptive?.saturationMessageCount ?? 5;
+    const saturationCount = adaptive?.saturationMessageCount ?? DEFAULT_THRESHOLDS.saturationMessageCount;
     const RUNAWAY_MSG_THRESHOLD = Math.max(saturationCount * 3, 15);
     const trimmedL3 = content.trim();
     const isSubstantialL3 = (trimmedL3.length > 6 && /[？?。！!]/.test(trimmedL3)) || trimmedL3.length > 15;

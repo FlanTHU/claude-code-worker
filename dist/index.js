@@ -65,11 +65,31 @@ export default definePluginEntry({
                     catch { }
                     return { text: '⏸️ 话题路由已**关闭**，消息将直接进入默认 session' };
                 }
-                return { text: `📡 话题路由状态: **${runtimeEnabled ? '开启' : '关闭'}**\n\n使用 \`/topic-router on\` 或 \`/topic-router off\` 切换` };
+                // status (default): show toggle + self-learning thresholds/stats so it's
+                // observable whether adaptive learning is actually moving.
+                const t = feedbackStore.getThresholds();
+                const s = feedbackStore.getStats();
+                const adjustedAgo = t.lastAdjustedAt
+                    ? `${Math.round((Date.now() - t.lastAdjustedAt) / 60000)}分钟前`
+                    : '从未';
+                return {
+                    text: `📡 话题路由: **${runtimeEnabled ? '开启' : '关闭'}**\n` +
+                        `\n**自学习阈值**(上次调整: ${adjustedAgo})\n` +
+                        `• 置信门槛 confidenceThreshold: ${t.confidenceThreshold}\n` +
+                        `• 饱和消息数 saturationMessageCount: ${t.saturationMessageCount}\n` +
+                        `• 饱和空闲分钟 saturationIdleMinutes: ${t.saturationIdleMinutes}\n` +
+                        `• 提示区间 hint: [${t.hintThresholdLow}, ${t.hintThresholdHigh}]\n` +
+                        `\n**反馈统计**\n` +
+                        `• 反馈事件总数: ${s.totalRoutes}\n` +
+                        `• 正向(continue留存): ${s.correctRoutes}\n` +
+                        `• 纠错(/switch): ${s.corrections}\n` +
+                        `• 漏判新话题(/newtopic): ${s.missedNewTopics}\n` +
+                        `\n使用 \`/topic-router on|off\` 切换`,
+                };
             },
         });
         const registry = new TopicRegistry(stateDir);
-        const feedbackStore = new FeedbackStore(stateDir);
+        const feedbackStore = new FeedbackStore(stateDir, (...a) => log.info(...a));
         const contextBridge = new ContextBridge(stateDir);
         const prunedCount = registry.prune(pluginConfig.pruneAfterHours * 3600 * 1000);
         if (prunedCount > 0) {
@@ -127,6 +147,7 @@ export default definePluginEntry({
             channels: ['feishu'],
             handler: async (ctx) => {
                 const label = (ctx.args ?? '').trim();
+                const cmdSessionKey = ctx?.sessionKey ?? ctx?.ctx?.sessionKey ?? '';
                 if (!label) {
                     const current = registry.getActive();
                     const allTopics = registry.getAll();
@@ -170,7 +191,7 @@ export default definePluginEntry({
                         };
                     }
                     // V4: Feedback — correction detection
-                    const lastRoute = feedbackStore.getLastRoute();
+                    const lastRoute = feedbackStore.getLastRoute(cmdSessionKey);
                     if (lastRoute && lastRoute.topic !== label) {
                         const elapsed = Date.now() - lastRoute.timestamp;
                         if (elapsed < 60_000) {

@@ -45,6 +45,7 @@ type CommandHandler = (params: {
   log: (...args: unknown[]) => void;
   feedbackStore?: FeedbackStore;
   contextBridge?: ContextBridge;
+  sessionKey: string;
 }) => Promise<HookResult | undefined>;
 
 // ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ const handleTopics: CommandHandler = async ({ registry }) => {
 // /switch — Switch to a specific topic
 // ---------------------------------------------------------------------------
 
-const handleSwitch: CommandHandler = async ({ args, registry, log, feedbackStore, contextBridge }) => {
+const handleSwitch: CommandHandler = async ({ args, registry, log, feedbackStore, contextBridge, sessionKey }) => {
   const label = args.trim();
   if (!label) {
     const current = registry.getActive();
@@ -176,7 +177,7 @@ const handleSwitch: CommandHandler = async ({ args, registry, log, feedbackStore
 
   // V4: Emit feedback if this is a correction of recent auto-route
   if (feedbackStore) {
-    const lastRoute = feedbackStore.getLastRoute();
+    const lastRoute = feedbackStore.getLastRoute(sessionKey);
     if (lastRoute && lastRoute.topic !== label) {
       const elapsed = Date.now() - lastRoute.timestamp;
       if (elapsed < 60_000) {
@@ -207,7 +208,7 @@ const handleSwitch: CommandHandler = async ({ args, registry, log, feedbackStore
 // /new — Create a new topic
 // ---------------------------------------------------------------------------
 
-const handleNew: CommandHandler = async ({ args, registry, log, feedbackStore }) => {
+const handleNew: CommandHandler = async ({ args, registry, log, feedbackStore, sessionKey }) => {
   const requestedLabel = args.trim() || `topic-${Date.now().toString(36)}`;
   // getOrCreate returns the real entry: if a same-name topic was ended, a fresh
   // sibling (new label/sessionKey) is created instead of reviving it.
@@ -217,7 +218,7 @@ const handleNew: CommandHandler = async ({ args, registry, log, feedbackStore })
 
   // V4: Emit feedback if system should have auto-created
   if (feedbackStore) {
-    const lastRoute = feedbackStore.getLastRoute();
+    const lastRoute = feedbackStore.getLastRoute(sessionKey);
     if (lastRoute && lastRoute.action === 'continue') {
       const elapsed = Date.now() - lastRoute.timestamp;
       if (elapsed < 120_000) {
@@ -319,7 +320,8 @@ export async function tryHandleCommand(
   config: TopicRouterConfig,
   log: (...args: unknown[]) => void,
   feedbackStore?: FeedbackStore,
-  contextBridge?: ContextBridge
+  contextBridge?: ContextBridge,
+  sessionKey = ''
 ): Promise<HookResult | undefined> {
   const trimmed = content.trim();
   const match = trimmed.match(/^\/(\w+)\s*(.*)/s);
@@ -331,7 +333,7 @@ export async function tryHandleCommand(
   const handler = COMMANDS[commandName];
   if (!handler) return undefined;
 
-  return handler({ args, registry, config, log, feedbackStore, contextBridge });
+  return handler({ args, registry, config, log, feedbackStore, contextBridge, sessionKey });
 }
 
 // ---------------------------------------------------------------------------

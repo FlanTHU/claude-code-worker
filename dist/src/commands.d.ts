@@ -11,4 +11,4 @@ import type { ContextBridge } from './context-bridge.js';
 /**
  * Try to handle a slash command. Returns undefined if the message is not a command.
  */
-export declare function tryHandleCommand(content: string, registry: TopicRegistry, config: TopicRouterConfig, log: (...args: unknown[]) => void, feedbackStore?: FeedbackStore, contextBridge?: ContextBridge): Promise<HookResult | undefined>;
+export declare function tryHandleCommand(content: string, registry: TopicRegistry, config: TopicRouterConfig, log: (...args: unknown[]) => void, feedbackStore?: FeedbackStore, contextBridge?: ContextBridge, sessionKey?: string): Promise<HookResult | undefined>;
