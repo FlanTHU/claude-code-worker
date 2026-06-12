@@ -123,14 +123,26 @@ fetch_via_tarball() {
 if [ -d "$REPO_DIR/.git" ]; then
   cd "$REPO_DIR"
   echo "  Repo exists, updating..."
-  if ! timeout 15 git fetch origin "$BRANCH" --force 2>/dev/null; then
-    warn "git fetch failed/timed out"
+  # Retry fetch (github is slow/flaky); slow-speed detection aborts a stalled
+  # transfer so the retry kicks in fast. Only after 3 tries fall back to tarball.
+  git config --global http.lowSpeedLimit 1000 2>/dev/null || true
+  git config --global http.lowSpeedTime 10 2>/dev/null || true
+  fetched=""
+  for attempt in 1 2 3; do
+    if timeout 30 git fetch origin "$BRANCH" --force 2>/dev/null; then
+      fetched="1"; break
+    fi
+    echo "  (fetch attempt $attempt failed, retrying...)"
+    sleep 2
+  done
+  if [ -n "$fetched" ]; then
+    git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
+    git reset --hard "origin/$BRANCH" 2>/dev/null || true
+  else
+    warn "git fetch failed/timed out after 3 tries"
     if ! fetch_via_tarball; then
       warn "Tarball also failed, using local code"
     fi
-  else
-    git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
-    git reset --hard "origin/$BRANCH" 2>/dev/null || true
   fi
 elif [ -d "$REPO_DIR" ]; then
   # Directory exists but not a git repo (e.g. leftover from the old destructive

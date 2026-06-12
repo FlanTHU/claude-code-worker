@@ -28,8 +28,8 @@ echo "[1/2] Patching dispatch: $DISPATCH_FILE"
 # the routing block OUTSIDE the before_dispatch block (out of scope for the
 # const-declared beforeDispatchResult). In that case we must NOT skip: we strip
 # the misplaced block and re-apply correctly.
-DISPATCH_STATE=$(python3 -c "
-import sys
+DISPATCH_STATE=$(DISPATCH_FILE="$DISPATCH_FILE" python3 - <<'PYEOF'
+import sys, os
 # Strip string/template literals and // line comments so brace-counting only
 # sees code structure: a '}' inside a string or comment must not shift the
 # nesting depth. Limitations (acceptable here, and node -c backstops any
@@ -52,7 +52,7 @@ def _code_only(line):
             q = None
         i += 1
     return ''.join(out)
-content = open('$DISPATCH_FILE').read()
+content = open(os.environ['DISPATCH_FILE']).read()
 lines = content.split('\n')
 if 'session re-routed to' not in content:
     print('UNPATCHED'); sys.exit(0)
@@ -80,7 +80,8 @@ for i in range(bd, len(lines)):
     if started and depth <= 0:
         close_idx = i; break
 print('OK' if (close_idx != -1 and ri < close_idx) else 'MISPLACED')
-")
+PYEOF
+)
 echo "  Dispatch patch state: $DISPATCH_STATE"
 
 if [ "$DISPATCH_STATE" = "OK" ]; then
@@ -91,8 +92,9 @@ else
   # If a misplaced routing block exists, strip it before re-applying.
   if [ "$DISPATCH_STATE" = "MISPLACED" ]; then
     echo "  Detected MISPLACED routing block (out of scope) — removing before re-apply."
-    python3 -c "
-dispatch_file = '$DISPATCH_FILE'
+    DISPATCH_FILE="$DISPATCH_FILE" python3 - <<'PYEOF'
+import os
+dispatch_file = os.environ['DISPATCH_FILE']
 lines = open(dispatch_file).read().split('\n')
 start = next((i for i, l in enumerate(lines)
               if 'beforeDispatchResult?.sessionKey' in l and 'acpDispatchSessionKey' in l), -1)
@@ -110,13 +112,13 @@ if start != -1:
         print('  ✓ Removed misplaced block')
     else:
         print('  ⚠ Could not bound misplaced block; aborting'); raise SystemExit(1)
-"
+PYEOF
   fi
 
-  python3 -c "
-import sys
+  DISPATCH_FILE="$DISPATCH_FILE" python3 - <<'PYEOF'
+import sys, os
 
-dispatch_file = '$DISPATCH_FILE'
+dispatch_file = os.environ['DISPATCH_FILE']
 with open(dispatch_file, 'r') as f:
     content = f.read()
 
@@ -196,7 +198,7 @@ routing_code = (
     f'{indent}\t\tconfig: cfg\n'
     f'{indent}\t}});\n'
     f'{indent}\tsessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);\n'
-    f'{indent}\tconsole.log(\`[before_dispatch] session re-routed to: \${{acpDispatchSessionKey}}\`);\n'
+    f'{indent}\tconsole.log(`[before_dispatch] session re-routed to: ${{acpDispatchSessionKey}}`);\n'
     f'{indent}}}'
 )
 lines.insert(insert_idx, routing_code)
@@ -204,7 +206,7 @@ lines.insert(insert_idx, routing_code)
 with open(dispatch_file, 'w') as f:
     f.write('\n'.join(lines))
 print('  ✓ Dispatch patched')
-"
+PYEOF
   # Syntax-check the patched dispatch file; restore backup on failure.
   if ! node -c "$DISPATCH_FILE" 2>/tmp/dispatch-syntax.err; then
     echo "  ✗ Patched dispatch failed syntax check — restoring backup:"
@@ -229,19 +231,19 @@ if grep -q "before_dispatch.*sessionKey" "$HOOK_FILE" 2>/dev/null; then
   echo "  Already patched. Skipping."
 else
   cp "$HOOK_FILE" "${HOOK_FILE}.bak"
-  python3 -c "
-import sys
+  HOOK_FILE="$HOOK_FILE" python3 - <<'PYEOF'
+import sys, os
 
-hook_file = '$HOOK_FILE'
+hook_file = os.environ['HOOK_FILE']
 with open(hook_file, 'r') as f:
     content = f.read()
 
 # Find: 'if (handlerResult?.handled) return handlerResult;'
-# Add after it: 'if (hookName === \"before_dispatch\" && handlerResult?.sessionKey) return handlerResult;'
+# Add after it: 'if (hookName === "before_dispatch" && handlerResult?.sessionKey) return handlerResult;'
 
 old = 'if (handlerResult?.handled) return handlerResult;'
 new = '''if (handlerResult?.handled) return handlerResult;
-\t\t\tif (hookName === \"before_dispatch\" && handlerResult?.sessionKey) return handlerResult;'''
+\t\t\tif (hookName === "before_dispatch" && handlerResult?.sessionKey) return handlerResult;'''
 
 if old not in content:
     print('ERROR: Cannot find hook pattern in hook-runner')
@@ -253,7 +255,7 @@ content = content.replace(old, new, 1)
 with open(hook_file, 'w') as f:
     f.write(content)
 print('  ✓ Hook-runner patched')
-"
+PYEOF
 fi
 
 # --- Verify ---
