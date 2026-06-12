@@ -99,6 +99,10 @@ export interface FeedbackStoreData {
         corrections: number;
         missedNewTopics: number;
     };
+    /** Persisted event-count at the last adapt, so the adapt cadence survives
+     *  process restarts (eventsSinceAdapt used to be in-memory and reset to 0 on
+     *  every restart, starving the adapt trigger under a frequently-restarted bridge). */
+    lastAdaptedEventCount?: number;
 }
 export interface ForkContext {
     parentTopicLabel: string;
