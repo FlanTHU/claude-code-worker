@@ -124,8 +124,22 @@ const FALLBACK_FILLER_PREFIXES = [
     '请问一下', '请问', '我想问一下', '我想问', '想问一下', '我想知道', '想知道',
     '我想了解', '想了解', '麻烦', '请', '查一下', '查查', '看一下', '搜一下',
 ];
-function deriveDisplayNameFallback(content) {
+// Structural prefixes that aren't real content — eval round markers ("【第2轮】",
+// "第2轮"), leading 【…】 brackets. The fallback name shows when the async LLM
+// namer hasn't returned yet (or timed out); without stripping these, a fast burst
+// of eval messages leaves names like "【第1轮】今…". Applied before filler peeling.
+function stripStructuralPrefix(s) {
+    let t = s;
+    // 【第N轮】 / 第N轮 round markers (Arabic or Chinese numerals).
+    t = t.replace(/^【\s*第?\s*[0-9一二三四五六七八九十]+\s*轮?\s*】/, '');
+    t = t.replace(/^第\s*[0-9一二三四五六七八九十]+\s*轮[:：，,、\s]*/, '');
+    // Any other short leading 【…】 bracket segment.
+    t = t.replace(/^【[^】]{0,12}】/, '');
+    return t.trim();
+}
+export function deriveDisplayNameFallback(content) {
     let trimmed = content.trim().replace(/\s+/g, ' ');
+    trimmed = stripStructuralPrefix(trimmed);
     // Peel leading filler prefixes (repeatedly, e.g. "请帮我查一下…").
     let changed = true;
     while (changed) {
@@ -138,9 +152,9 @@ function deriveDisplayNameFallback(content) {
             }
         }
     }
-    // Tighten to 6 chars to match the LLM namer's "2-6 字" target, so the fallback
-    // reads like a real short title rather than a clipped sentence.
-    const maxLen = 6;
+    // Match the LLM namer's "约2-10字符" target so the fallback reads like a real
+    // short title rather than a clipped sentence.
+    const maxLen = 10;
     if (trimmed.length <= maxLen)
         return trimmed;
     return trimmed.slice(0, maxLen) + '…';

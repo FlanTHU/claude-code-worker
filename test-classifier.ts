@@ -5,7 +5,7 @@
 
 import { classify, parseExplicitCommand, matchKeywords, detectContinuation, generateTopicLabel } from './src/classifier.js';
 import { TopicRegistry } from './src/topic-registry.js';
-import { handleBeforeDispatch } from './src/hook-handler.js';
+import { handleBeforeDispatch, deriveDisplayNameFallback } from './src/hook-handler.js';
 import fs from 'node:fs';
 
 const STATE_DIR = '/tmp/topic-router-test-state';
@@ -409,6 +409,29 @@ async function testExpireStaleInactive() {
   assert(raw['live'].status === 'active', `live stays active despite 25h idle (got ${raw['live'].status})`);
 }
 
+function testFallbackName() {
+  // The fallback name (shown until the async LLM namer returns / when it times out)
+  // must strip eval round markers and filler, and cap at 10 chars. Regression for
+  // "【第1轮】今…" leaking through when LLM naming hadn't completed.
+  console.log('\n=== Fallback display name (strip 【第N轮】 + filler) ===');
+  const cases: [string, string][] = [
+    ['【第1轮】今天武汉天气怎么样', '今天武汉天气怎么样'],
+    ['【第2轮】帮我搜一下xinyu3', 'xinyu3'],
+    ['第3轮 Python字典排序', 'Python字典排序'],
+    ['帮我查一下星巴克的热量', '星巴克的热量'],
+    ['【第10轮】给我讲个关于程序员的冷笑话', '给我讲个关于程序员的…'], // 13字 >10 → 截前10带…
+  ];
+  for (const [input, expected] of cases) {
+    const got = deriveDisplayNameFallback(input);
+    assert(got === expected, `"${input}" → "${expected}" (got "${got}")`);
+  }
+  // No 【第N轮】 prefix survives, ever.
+  for (const input of ['【第1轮】今…', '【第 2 轮】测试', '第二轮：查日程']) {
+    const got = deriveDisplayNameFallback(input);
+    assert(!/^【?第/.test(got), `no round-prefix leak: "${input}" → "${got}"`);
+  }
+}
+
 function testSlashLabelGuard() {
   // §3b defense-in-depth: generateTopicLabel must NOT hash slash-command text into a
   // per-command junk label (the "/NEW (vnxt)" pollution). Any "/"-prefixed content
@@ -436,6 +459,7 @@ async function main() {
   await testReferenceContinue();
   await testContinuityOverKeyword();
   await testExpireStaleInactive();
+  testFallbackName();
   await testShortFollowUpFragment();
   await testHookPassthroughAndShortFollowUp();
   testSlashLabelGuard();
