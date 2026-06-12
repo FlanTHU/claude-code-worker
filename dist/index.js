@@ -44,7 +44,7 @@ export default definePluginEntry({
         log.info(`[topic-router] Runtime enabled: ${runtimeEnabled} (from ${toggleFile})`);
         api.registerCommand({
             name: 'topic-router',
-            description: '开关话题路由 (/topic-router on|off|status)',
+            description: '开关话题路由 (/topic-router on|off|status|reset)',
             acceptsArgs: true,
             channels: ['feishu'],
             handler: async (ctx) => {
@@ -65,6 +65,18 @@ export default definePluginEntry({
                     catch { }
                     return { text: '⏸️ 话题路由已**关闭**，消息将直接进入默认 session' };
                 }
+                if (arg === 'reset') {
+                    // Clear learned feedback (in-memory + disk) at runtime — no restart needed.
+                    feedbackStore.reset();
+                    const d = feedbackStore.getThresholds();
+                    return {
+                        text: `🔄 自学习数据已**重置**为默认值\n` +
+                            `• confidenceThreshold: ${d.confidenceThreshold}\n` +
+                            `• saturationMessageCount: ${d.saturationMessageCount}\n` +
+                            `• saturationIdleMinutes: ${d.saturationIdleMinutes}\n` +
+                            `反馈事件/统计已清零,自学习从干净状态重新开始。`,
+                    };
+                }
                 // status (default): show toggle + self-learning thresholds/stats so it's
                 // observable whether adaptive learning is actually moving.
                 const t = feedbackStore.getThresholds();
@@ -84,7 +96,7 @@ export default definePluginEntry({
                         `• 正向(continue留存): ${s.correctRoutes}\n` +
                         `• 纠错(/switch): ${s.corrections}\n` +
                         `• 漏判新话题(/newtopic): ${s.missedNewTopics}\n` +
-                        `\n使用 \`/topic-router on|off\` 切换`,
+                        `\n使用 \`/topic-router on|off\` 切换,\`/topic-router reset\` 重置自学习`,
                 };
             },
         });

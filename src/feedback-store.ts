@@ -69,6 +69,22 @@ export class FeedbackStore {
     return this.data.stats;
   }
 
+  /** Wipe all learned feedback back to defaults — both in-memory and on disk.
+   *  Lets `/topic-router reset` clear bug-era / stale data at runtime without a
+   *  restart (deleting the file alone doesn't help: the running process keeps the
+   *  old data in memory and rewrites it on the next record()). */
+  reset(): void {
+    this.data = {
+      events: [],
+      thresholds: { ...DEFAULT_THRESHOLDS },
+      stats: { totalRoutes: 0, correctRoutes: 0, corrections: 0, missedNewTopics: 0 },
+      lastAdaptedEventCount: 0,
+    };
+    this.lastRouteBySession.clear();
+    this.save();
+    this.log('[v4] Feedback store reset to defaults (events/stats/thresholds cleared)');
+  }
+
   setLastRoute(sessionKey: string, info: LastRouteInfo): void {
     this.lastRouteBySession.set(sessionKey, info);
   }
