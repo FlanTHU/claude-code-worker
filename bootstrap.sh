@@ -19,7 +19,7 @@
 #   - Gateway process owner: node user (runuser -u node)
 set -e
 
-REPO_URL="https://github.com/FlanTHU/claude-code-worker.git"
+REPO_URL="${REPO_URL:-https://github.com/FlanTHU/claude-code-worker.git}"
 GIT_ROOT="/root/.openclaw/workspace/code-repo"
 PLUGIN_DIR="$GIT_ROOT"
 EXT_DIR="/app/dist/extensions/topic-router"
@@ -49,10 +49,20 @@ git config --global http.sslVerify false 2>/dev/null || true
 
 if [ -d "$GIT_ROOT/.git" ]; then
   cd "$GIT_ROOT"
-  # Try to fetch, but don't fail if network is unavailable (use local code)
-  if ! timeout 15 git fetch origin "$BRANCH" --force 2>/dev/null; then
-    echo "  (fetch failed/timed out, using local code)"
-  fi
+  # Try to fetch with retries (network to github is slow/flaky); don't fail if
+  # unavailable — fall back to local code. Slow-speed detection aborts a stalled
+  # transfer fast so the retry can kick in (mirrors redeploy.sh).
+  git config --global http.lowSpeedLimit 1000 2>/dev/null || true
+  git config --global http.lowSpeedTime 10 2>/dev/null || true
+  fetched=""
+  for attempt in 1 2 3; do
+    if timeout 30 git fetch origin "$BRANCH" --force 2>/dev/null; then
+      fetched="1"; break
+    fi
+    echo "  (fetch attempt $attempt failed, retrying...)"
+    sleep 2
+  done
+  [ -z "$fetched" ] && echo "  (fetch failed/timed out after 3 tries, using local code)"
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
   git reset --hard "origin/$BRANCH" 2>/dev/null || true
 elif [ -d "$GIT_ROOT" ]; then
