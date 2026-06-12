@@ -15,6 +15,11 @@ export declare class FeedbackStore {
     private save;
     getThresholds(): AdaptiveThresholds;
     getStats(): FeedbackStoreData['stats'];
+    /** Wipe all learned feedback back to defaults — both in-memory and on disk.
+     *  Lets `/topic-router reset` clear bug-era / stale data at runtime without a
+     *  restart (deleting the file alone doesn't help: the running process keeps the
+     *  old data in memory and rewrites it on the next record()). */
+    reset(): void;
     setLastRoute(sessionKey: string, info: LastRouteInfo): void;
     getLastRoute(sessionKey: string): LastRouteInfo | null;
     record(signal: FeedbackSignal, metadata: Omit<FeedbackEvent, 'timestamp' | 'signal'>): void;

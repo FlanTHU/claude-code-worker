@@ -457,6 +457,15 @@ function testFeedbackStore() {
   const prev2 = store2.getLastRoute('s');
   assert(prev2?.topic === 'coding', `第二条能读到上一条 coding`);
   assert(store2.getStats().correctRoutes === before, `仅 get/set 不应改变 correctRoutes(修复前的 bug 会让它虚增)`);
+
+  // reset:灌入脏数据后清空,阈值/统计回默认、lastRoute 清空
+  store2.record('continued_in_routed_topic', { fromTopic: 'x', toTopic: 'x', classifierLayer: 'L2', confidence: 0.8, messageSnippet: 'm' });
+  store2.getThresholds().saturationMessageCount = 8; // 模拟被 bug 推高
+  store2.reset();
+  assert(store2.getStats().totalRoutes === 0, `reset 后 totalRoutes 归零`);
+  assert(store2.getThresholds().saturationMessageCount === 3, `reset 后 saturationMessageCount 回默认3 (got ${store2.getThresholds().saturationMessageCount})`);
+  assert(store2.getThresholds().saturationIdleMinutes === 5, `reset 后 idle 回默认5`);
+  assert(store2.getLastRoute('s') === null, `reset 后 lastRoute 清空`);
 }
 
 function testSlashLabelGuard() {
