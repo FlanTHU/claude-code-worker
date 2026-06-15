@@ -32,6 +32,24 @@ export function getRecentAutoNew(sessionKey) {
 export function clearRecentAutoNew(sessionKey) {
     recentAutoNewBySession.delete(sessionKey);
 }
+const PENDING_FORCE_CONTINUE_TTL = 2 * 60 * 1000; // 2 minutes
+const pendingForceContinueBySession = new Map();
+export function setPendingForceContinue(sessionKey, label) {
+    if (!sessionKey || !label)
+        return;
+    pendingForceContinueBySession.set(sessionKey, { label, armedAt: Date.now() });
+}
+/** Consume the pending force-continue for this session (one-shot). Returns the target
+ * label if armed and unexpired, else null. Always clears the entry when present. */
+function takePendingForceContinue(sessionKey) {
+    const entry = pendingForceContinueBySession.get(sessionKey);
+    if (!entry)
+        return null;
+    pendingForceContinueBySession.delete(sessionKey);
+    if (Date.now() - entry.armedAt > PENDING_FORCE_CONTINUE_TTL)
+        return null;
+    return entry.label;
+}
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
 function resolveTopicFromQuote(quotedContent, registry, log) {
     if (!quotedContent)
@@ -305,6 +323,13 @@ async function handleBeforeDispatchInner(params) {
     }
     const quotedTopicLabel = resolveTopicFromQuote(quotedContent, registry, log);
     const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
+    // Force-continue: a prior turn switched active back to a parent topic and told the user
+    // to resend (after an auto-new misroute, or a manual /switch). The classifier would
+    // re-judge the identical resent text `new` again — or L1 keywords would pull it into the
+    // mis-created topic that already learned its words — so honor the one-shot pending entry
+    // and continue into the parent, bypassing classification. Quoted messages (explicit user
+    // intent) still take precedence and are handled first.
+    const forcedLabel = quotedTopicLabel ? null : takePendingForceContinue(sessionKey);
     let result;
     if (quotedTopicLabel) {
         const activeTopic = registry.getActive();
@@ -316,6 +341,15 @@ async function handleBeforeDispatchInner(params) {
             reason: `Quoted message belongs to topic "${quotedTopicLabel}"`,
         };
         log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}" (action=${result.action})`);
+    }
+    else if (forcedLabel && registry.get(forcedLabel)) {
+        result = {
+            action: 'continue',
+            targetLabel: forcedLabel,
+            confidence: 0.99,
+            reason: `pending-force-continue: resend after switch-back to "${forcedLabel}"`,
+        };
+        log(`[hook-handler] Force-continue to "${forcedLabel}" (pending resend), bypassing classifier`);
     }
     else {
         // V4: inject feedback-store adaptive thresholds so the classifier uses
@@ -431,6 +465,7 @@ async function handleBeforeDispatchInner(params) {
                     newLabel: created.label,
                     previousLabel: activeTopic.label,
                     previousDisplayName: activeTopic.displayName,
+                    originalSessionKey: sessionKey,
                     createdAt: Date.now(),
                 });
             }

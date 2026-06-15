@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { TopicRegistry } from './src/topic-registry.js';
-import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew } from './src/hook-handler.js';
+import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew, setPendingForceContinue } from './src/hook-handler.js';
 import { FeedbackStore } from './src/feedback-store.js';
 import { ContextBridge } from './src/context-bridge.js';
 import { looksLikeNoContext, extractAssistantText } from './src/no-context-detect.js';
@@ -190,6 +190,8 @@ export default definePluginEntry({
                         contextBridge.markMerged(fork);
                         registry.markEnded(currentTopic.label);
                         registry.setActive(label);
+                        if (cmdSessionKey)
+                            setPendingForceContinue(cmdSessionKey, label);
                         cmdLog(`Merged back: ${currentTopic.label} → ${label}`);
                         feedbackStore.record('immediate_switch_back', {
                             fromTopic: currentTopic.label,
@@ -221,6 +223,12 @@ export default definePluginEntry({
                 // Ended topics are not revived in place; use the entry that became active.
                 const activated = registry.setActive(topic.label) ?? topic;
                 cmdLog(`Switched to topic: ${activated.label}`);
+                // Arm a one-shot force-continue so the user's NEXT message stays in the topic they
+                // just chose. Without this, re-classification (or L1 keywords learned by a previously
+                // mis-created topic) can pull the immediate follow-up right back out — the loop the
+                // user hit ("switch 回原话题后重复输入又被分到新话题").
+                if (cmdSessionKey)
+                    setPendingForceContinue(cmdSessionKey, activated.label);
                 return {
                     text: `✅ 已切换到话题 **${activated.displayName}** (${activated.label})\n\nSession: \`${activated.sessionKey}\`\n历史消息: ${activated.messageCount}条`,
                 };
@@ -291,7 +299,11 @@ export default definePluginEntry({
                     // so genuine new topics are not merged back (would re-trigger topic-collapse).
                     if (looksLikeNoContext(extractAssistantText(event))) {
                         registry.setActive(autoNew.previousLabel);
-                        log.info(`[topic-router-output] No-context reply in auto-new topic "${label}"; auto-switched active back to "${autoNew.previousLabel}"`);
+                        // Arm a one-shot force-continue on the INBOUND key so the user's resend
+                        // actually lands in the parent topic — classify() would otherwise re-judge
+                        // the identical text `new` again and the "resend" promise would never hold.
+                        setPendingForceContinue(autoNew.originalSessionKey, autoNew.previousLabel);
+                        log.info(`[topic-router-output] No-context reply in auto-new topic "${label}"; auto-switched active back to "${autoNew.previousLabel}", armed force-continue on "${autoNew.originalSessionKey}"`);
                         footer = `\n\n---\n⚠️ 检测到这条可能是上个话题的追问，已自动切回「${autoNew.previousDisplayName}」。请重发刚才的消息即可在原上下文继续。`;
                     }
                     else {

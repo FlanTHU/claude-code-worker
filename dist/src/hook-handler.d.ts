@@ -7,10 +7,12 @@ export interface RecentAutoNew {
     newLabel: string;
     previousLabel: string;
     previousDisplayName: string;
+    originalSessionKey: string;
     createdAt: number;
 }
 export declare function getRecentAutoNew(sessionKey: string): RecentAutoNew | null;
 export declare function clearRecentAutoNew(sessionKey: string): void;
+export declare function setPendingForceContinue(sessionKey: string, label: string): void;
 export declare function deriveDisplayNameFallback(content: string): string;
 /**
  * Session routing approach:

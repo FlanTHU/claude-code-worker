@@ -32,6 +32,10 @@ export interface RecentAutoNew {
   newLabel: string;
   previousLabel: string;
   previousDisplayName: string;
+  // The INBOUND (pre-routing) session key of the message that triggered the auto-new.
+  // The output hook keys autoNew on the routed topic session key, but a resend arrives
+  // on this inbound key — we need it to arm pendingForceContinue so the resend matches.
+  originalSessionKey: string;
   createdAt: number;
 }
 const recentAutoNewBySession = new Map<string, RecentAutoNew>();
@@ -48,6 +52,36 @@ export function getRecentAutoNew(sessionKey: string): RecentAutoNew | null {
 
 export function clearRecentAutoNew(sessionKey: string): void {
   recentAutoNewBySession.delete(sessionKey);
+}
+
+// ── Pending force-continue (the "resend lands in the parent topic" promise) ──
+// When the output hook auto-switches active back to a parent topic after a no-context
+// reply, it tells the user to "just resend". But classify() re-decides from scratch and,
+// on the identical resent text, re-judges it `new` — spawning yet another topic, so the
+// promise never holds. We bridge that gap: arming a pending entry keyed on the inbound
+// session key forces the NEXT message on that key to continue into the parent topic,
+// bypassing the classifier entirely. One-shot + short TTL so it only catches the immediate
+// resend and never swallows a genuinely different next message.
+interface PendingForceContinue {
+  label: string;
+  armedAt: number;
+}
+const PENDING_FORCE_CONTINUE_TTL = 2 * 60 * 1000; // 2 minutes
+const pendingForceContinueBySession = new Map<string, PendingForceContinue>();
+
+export function setPendingForceContinue(sessionKey: string, label: string): void {
+  if (!sessionKey || !label) return;
+  pendingForceContinueBySession.set(sessionKey, { label, armedAt: Date.now() });
+}
+
+/** Consume the pending force-continue for this session (one-shot). Returns the target
+ * label if armed and unexpired, else null. Always clears the entry when present. */
+function takePendingForceContinue(sessionKey: string): string | null {
+  const entry = pendingForceContinueBySession.get(sessionKey);
+  if (!entry) return null;
+  pendingForceContinueBySession.delete(sessionKey);
+  if (Date.now() - entry.armedAt > PENDING_FORCE_CONTINUE_TTL) return null;
+  return entry.label;
 }
 
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
@@ -396,6 +430,14 @@ async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResu
   const quotedTopicLabel = resolveTopicFromQuote(quotedContent, registry, log);
   const recentMessages = recentMessagesBySession.get(sessionKey) ?? [];
 
+  // Force-continue: a prior turn switched active back to a parent topic and told the user
+  // to resend (after an auto-new misroute, or a manual /switch). The classifier would
+  // re-judge the identical resent text `new` again — or L1 keywords would pull it into the
+  // mis-created topic that already learned its words — so honor the one-shot pending entry
+  // and continue into the parent, bypassing classification. Quoted messages (explicit user
+  // intent) still take precedence and are handled first.
+  const forcedLabel = quotedTopicLabel ? null : takePendingForceContinue(sessionKey);
+
   let result;
   if (quotedTopicLabel) {
     const activeTopic = registry.getActive();
@@ -407,6 +449,14 @@ async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResu
       reason: `Quoted message belongs to topic "${quotedTopicLabel}"`,
     };
     log(`[hook-handler] Routed via quoted message to topic "${quotedTopicLabel}" (action=${result.action})`);
+  } else if (forcedLabel && registry.get(forcedLabel)) {
+    result = {
+      action: 'continue' as const,
+      targetLabel: forcedLabel,
+      confidence: 0.99,
+      reason: `pending-force-continue: resend after switch-back to "${forcedLabel}"`,
+    };
+    log(`[hook-handler] Force-continue to "${forcedLabel}" (pending resend), bypassing classifier`);
   } else {
     // V4: inject feedback-store adaptive thresholds so the classifier uses
     // feedback-driven values (confidence / saturation) instead of hardcoded defaults.
@@ -531,6 +581,7 @@ async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResu
           newLabel: created.label,
           previousLabel: activeTopic.label,
           previousDisplayName: activeTopic.displayName,
+          originalSessionKey: sessionKey,
           createdAt: Date.now(),
         });
       }
