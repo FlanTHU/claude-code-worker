@@ -27,6 +27,36 @@ function kwHit(kw: string, msg: string): boolean {
   return msg.includes(k);
 }
 
+/**
+ * Count how many DISTINCT specific tokens from `content` appear verbatim in `replyText`.
+ * Used by the carry-over rule (L1.6): a user follow-up that operates on the assistant's
+ * last reply ("申请X、Y的权限" after the reply listed meetings X/Y) copies those item
+ * names verbatim, so it shares concrete tokens with the reply even when it shares none
+ * with the active topic's keywords.
+ *
+ * Tokens are: ASCII words ≥4 chars, and CJK runs ≥2 chars (the content is split on any
+ * non-CJK char, so punctuation like 、，：and spaces separate the listed items into their
+ * own runs — "申请：A、B、C 的权限" → 申请/A/B/C/的权限). Each distinct run is counted at most
+ * once (verbatim substring of the reply), so a single shared phrase contributes exactly 1
+ * — keeping the ≥2 threshold meaning "≥2 distinct shared items", not one word over-counted.
+ * Stopwords excluded. Pure function, no registry side effects.
+ */
+function countSignalOverlap(content: string, replyText: string): number {
+  if (!content || !replyText) return 0;
+  const reply = replyText.toLowerCase();
+  const tokens = new Set<string>();
+
+  for (const m of content.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []) tokens.add(m);
+  for (const run of content.match(/[一-龥]{2,}/g) ?? []) tokens.add(run.toLowerCase());
+
+  let hits = 0;
+  for (const tok of tokens) {
+    if (STOPWORDS.has(tok)) continue;
+    if (reply.includes(tok)) hits++;
+  }
+  return hits;
+}
+
 export interface ClassifyOptions {
   content: string;
   recentMessages: string[];
@@ -251,6 +281,7 @@ const CLASSIFY_SYSTEM_PROMPT = `话题分类器。判断消息归属。continue=
 - 应 continue：消息是当前话题这个多步任务链里的中间步骤（如当前在"整理日报"，"搜一下张三"是为日报查人）。即便它字面是个独立祈使句，只要在为当前话题的目标服务，就 continue。
 - 应 new/switch：消息与当前话题的目标/主题无关，只是碰巧在同一会话里连续出现。即便用户在连续提一串独立请求，每条之间没有共同目标，也要各自判 new/switch。绝不能因为"用户在连续提问"或"延续了提独立请求的模式"就判 continue——那是把时间相邻误当语义关联。
 （例：当前话题是"武汉天气"，接着用户问"我名下有哪些IT资产"→这是 new，不是天气话题的延续；再问"把这句翻译成日语"→还是 new。它们只是连续，彼此和天气都无关。）
+如提供了"上一条助手回复"，要特别注意：用户的新消息常常是对这条回复的承接/追问——对回复里列出的条目做操作（申请/选择/确认/展开某项/追问细节），或回答助手刚提出的问题。这种情况即便新消息与当前话题的关键词字面不重合，也属于 continue（它在回应助手刚给出的内容，就是当前话题的一部分）。先判断新消息是不是在操作或回应"上一条助手回复"的内容。
 每个话题标了"最近活跃"（如 刚活跃/8分钟前/2小时前）。已经冷掉很久（如数十分钟/数小时前）、且关键词杂糅多个领域的话题，往往是早前堆积的旧话题，不要硬把新消息并进去——除非新消息语义上明确属于它。
 拿不准时，先看语义是否相关：相关但不确定归属 → continue；无明显语义关联 → new。只返回JSON：{"action":"continue|switch|new","label":"话题label或null","reason":"原因"}`;
 
@@ -270,7 +301,8 @@ async function classifyWithLLM(
   allTopics: TopicEntry[],
   recentMessages: string[],
   llmConfig: LLMConfig,
-  log: (...args: unknown[]) => void
+  log: (...args: unknown[]) => void,
+  lastAssistantReply?: string
 ): Promise<ClassifyResult | null> {
   const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
   const model = llmConfig.model ?? DEFAULT_MODEL;
@@ -302,9 +334,17 @@ async function classifyWithLLM(
     ? `\n最近消息（当前话题 "${activeTopic?.label ?? '无'}"，时间从旧到新）:\n${recentMessages.map(m => `  - ${m.slice(0, 120)}`).join('\n')}`
     : '';
 
+  // The other half of the dialog: what the assistant said just before this message.
+  // A follow-up that operates on this reply ("申请X的权限" after the assistant listed
+  // X/Y/Z) is a continuation even with no keyword overlap — the LLM can only see that
+  // if we show it the reply.
+  const lastReplyCtx = lastAssistantReply
+    ? `\n上一条助手回复（新消息可能是对它的承接/追问）:\n  ${lastAssistantReply.slice(0, 300)}`
+    : '';
+
   const userPrompt = `已有话题：
 ${topicSummary || '（暂无话题）'}
-${recentCtx}
+${recentCtx}${lastReplyCtx}
 
 新消息：${content}
 
@@ -415,7 +455,8 @@ export async function classify(
   registry: TopicRegistry,
   config: TopicRouterConfig,
   llmConfig?: LLMConfig,
-  log?: (...args: unknown[]) => void
+  log?: (...args: unknown[]) => void,
+  lastAssistantReply?: string
 ): Promise<ClassifyResult> {
   const noop = () => {};
   const _log = log ?? noop;
@@ -493,6 +534,26 @@ export async function classify(
   const shortFollowUpResult = detectShortFollowUp(content, activeTopic, recentlyActive);
   if (shortFollowUpResult && shortFollowUpResult.confidence >= effectiveConfig.classifier.confidenceThreshold) {
     return shortFollowUpResult;
+  }
+
+  // L1.6: Carry-over from the assistant's last reply. A follow-up that operates on what
+  // the assistant just said ("申请X、Y的权限" after the reply listed meetings X/Y) copies
+  // those item names verbatim — so it overlaps the reply even with zero overlap on the
+  // topic's own keywords, which is exactly the case L1.5 auto-new would wrongly fire on.
+  // Require the topic to be recently active and ≥2 distinct shared tokens: conservative,
+  // so a stray single-word coincidence doesn't stick (run_027 over-continue lesson). Misses
+  // fall through to the LLM (which now also sees the reply) and L1.5.
+  if (activeTopic && recentlyActive && lastAssistantReply) {
+    const overlap = countSignalOverlap(content, lastAssistantReply);
+    if (overlap >= 2) {
+      _log(`[classifier] Carry-over: ${overlap} tokens shared with last assistant reply → continue "${activeTopic.label}"`);
+      return {
+        action: 'continue',
+        targetLabel: activeTopic.label,
+        confidence: 0.8,
+        reason: `Carry-over from assistant reply (${overlap} shared tokens) on "${activeTopic.label}"`,
+      };
+    }
   }
 
   // L1.5: Auto-new checks (before LLM fallback)
@@ -579,7 +640,7 @@ export async function classify(
       _log(`[classifier-llm] Circuit open, skipping LLM (cooldown 60s)`);
     } else {
       const llmResult = await classifyWithLLM(
-        content, activeTopic, allTopics, recentMessages, llmConfig, _log
+        content, activeTopic, allTopics, recentMessages, llmConfig, _log, lastAssistantReply
       );
       if (llmResult) return llmResult;
     }

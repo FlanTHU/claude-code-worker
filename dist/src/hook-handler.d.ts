@@ -13,6 +13,10 @@ export interface RecentAutoNew {
 export declare function getRecentAutoNew(sessionKey: string): RecentAutoNew | null;
 export declare function clearRecentAutoNew(sessionKey: string): void;
 export declare function setPendingForceContinue(sessionKey: string, label: string): void;
+/** Store the assistant's last reply (truncated), keyed by the ROUTED session key the
+ * output hook sees. Translated to the inbound key via routedToInboundKey so classify()
+ * can read it. Called from the output hook in index.ts. */
+export declare function setLastAssistantReply(routedSessionKey: string, text: string): void;
 export declare function deriveDisplayNameFallback(content: string): string;
 /**
  * Session routing approach:

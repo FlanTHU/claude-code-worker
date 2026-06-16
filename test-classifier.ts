@@ -345,6 +345,42 @@ async function testShortFollowUpFragment() {
     `Recent short fragment "郑州哪" → continue weather (got ${r.action}/${r.targetLabel})`);
 }
 
+async function testCarryOverFromAssistantReply() {
+  console.log('\n=== L1.6: Carry-over from assistant reply ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('meeting', '会议总结');
+  // Topic keywords deliberately do NOT contain the meeting names — like the real bug.
+  registry.setKeywords('meeting', ['会议', '纪要', '权限', '脱敏', '日志']);
+
+  // Saturated + idle so L1.5 auto-new WOULD fire on an unrelated-looking message.
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['meeting'].messageCount = 8;
+  data.topics['meeting'].lastActiveAt = Date.now() - 30 * 1000; // recently active (30s)
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  const assistantReply = '昨日会议汇总：再对下复杂任务、复杂任务再对下、M-F-8-004的视频会议、自动化测试日会。需要批量申请无权限会议的纪要查看权限吗？';
+  const followUp = '申请：再对下复杂任务、复杂任务再对下、自动化测试日会 的权限';
+
+  // The exact bug repro: without carry-over this routed `new`. ≥2 meeting names are
+  // copied verbatim from the reply → carry-over rescues it to continue.
+  const r = await classify(followUp, [], registry, config, undefined, undefined, assistantReply);
+  assert(r.action === 'continue' && r.targetLabel === 'meeting',
+    `Follow-up reusing reply's item names → continue meeting (got ${r.action}/${r.targetLabel})`);
+
+  // Negative: an unrelated message sharing <2 tokens with the reply must NOT be picked up
+  // by the carry-over rule specifically (it may still continue via other layers like sticky,
+  // but the decision must not come from L1.6).
+  const r2 = await classify('帮我把这段代码改成异步实现', [], registry, config, undefined, undefined, assistantReply);
+  assert(!r2.reason?.includes('Carry-over'),
+    `Unrelated msg not picked up by carry-over rule (got reason=${r2.reason})`);
+
+  // No assistant reply available → behaves as before (regression guard).
+  const r3 = await classify(followUp, [], registry, config);
+  assert(typeof r3.action === 'string',
+    `No lastAssistantReply → classifies without error (got ${r3.action})`);
+}
+
 async function testHookPassthroughAndShortFollowUp() {
   console.log('\n=== Hook: Gateway Commands + Short Follow-up ===');
   resetState();
@@ -498,6 +534,7 @@ async function main() {
   testFallbackName();
   testFeedbackStore();
   await testShortFollowUpFragment();
+  await testCarryOverFromAssistantReply();
   await testHookPassthroughAndShortFollowUp();
   testSlashLabelGuard();
 

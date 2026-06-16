@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { TopicRegistry } from './src/topic-registry.js';
-import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew, setPendingForceContinue } from './src/hook-handler.js';
+import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew, setPendingForceContinue, setLastAssistantReply } from './src/hook-handler.js';
 import { FeedbackStore } from './src/feedback-store.js';
 import { ContextBridge } from './src/context-bridge.js';
 import { looksLikeNoContext, extractAssistantText } from './src/no-context-detect.js';
@@ -316,6 +316,13 @@ export default definePluginEntry({
 
         const topic = registry.get(label);
         const displayName = topic?.displayName ?? label;
+
+        // Record the assistant's reply so the classifier can see the other half of the
+        // dialog on the user's NEXT message (a follow-up operating on what was just said
+        // would otherwise look unrelated to the topic's keywords → misclassified `new`).
+        const assistantText = extractAssistantText(event);
+        if (assistantText) setLastAssistantReply(sessionKey, assistantText);
+
         const autoNew = getRecentAutoNew(sessionKey);
         let footer: string;
         if (autoNew && autoNew.newLabel === label) {
@@ -326,7 +333,7 @@ export default definePluginEntry({
           // just resend (this turn can't be salvaged — the reply already went out). We only
           // act on an explicit "no context" declaration, never a generic clarifying question,
           // so genuine new topics are not merged back (would re-trigger topic-collapse).
-          if (looksLikeNoContext(extractAssistantText(event))) {
+          if (looksLikeNoContext(assistantText)) {
             registry.setActive(autoNew.previousLabel);
             // Arm a one-shot force-continue on the INBOUND key so the user's resend
             // actually lands in the parent topic — classify() would otherwise re-judge

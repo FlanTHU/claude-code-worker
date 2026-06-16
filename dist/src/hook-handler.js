@@ -50,6 +50,44 @@ function takePendingForceContinue(sessionKey) {
         return null;
     return entry.label;
 }
+// ── Last assistant reply (so the classifier can see the other half of the dialog) ──
+// The classifier only ever saw user messages (recentMessages). A user follow-up that
+// operates on what the assistant just said — "申请X的权限" after the assistant listed
+// meetings X/Y/Z — looks unrelated to the active topic's keywords and gets misclassified
+// as `new`. We record the assistant's last reply so classify() can pass it to the LLM
+// and a "carry-over" rule can detect the overlap. Two maps because of a key mismatch:
+//   - The output hook only knows the ROUTED topic session key (agent:main:topic:xxx).
+//   - classify() reads state under the INBOUND key (agent:main:main).
+// `routedToInboundKey` is filled at routing time (both keys in scope there) so the output
+// hook can translate its routed key back to the inbound key it should store under.
+const LAST_ASSISTANT_REPLY_MAXLEN = 300;
+const lastAssistantReplyBySession = new Map();
+const routedToInboundKey = new Map();
+/** Record the topicKey→inboundKey mapping at routing time. Bounded like the other maps. */
+function rememberRouting(inboundKey, routedKey) {
+    if (!inboundKey || !routedKey)
+        return;
+    routedToInboundKey.set(routedKey, inboundKey);
+    if (routedToInboundKey.size > MAX_TRACKED_SESSIONS) {
+        const oldest = routedToInboundKey.keys().next().value;
+        if (oldest)
+            routedToInboundKey.delete(oldest);
+    }
+}
+/** Store the assistant's last reply (truncated), keyed by the ROUTED session key the
+ * output hook sees. Translated to the inbound key via routedToInboundKey so classify()
+ * can read it. Called from the output hook in index.ts. */
+export function setLastAssistantReply(routedSessionKey, text) {
+    if (!routedSessionKey || !text)
+        return;
+    const inboundKey = routedToInboundKey.get(routedSessionKey) ?? routedSessionKey;
+    lastAssistantReplyBySession.set(inboundKey, text.slice(0, LAST_ASSISTANT_REPLY_MAXLEN));
+    if (lastAssistantReplyBySession.size > MAX_TRACKED_SESSIONS) {
+        const oldest = lastAssistantReplyBySession.keys().next().value;
+        if (oldest)
+            lastAssistantReplyBySession.delete(oldest);
+    }
+}
 const TOPIC_FOOTER_REGEX = /📌\s*话题[:：]\s*(.+?)(?:\s*$|\n)/;
 function resolveTopicFromQuote(quotedContent, registry, log) {
     if (!quotedContent)
@@ -357,7 +395,8 @@ async function handleBeforeDispatchInner(params) {
         const classifyConfig = (feedbackStore && config.v4?.feedback?.enabled)
             ? { ...config, _adaptiveThresholds: feedbackStore.getThresholds() }
             : config;
-        result = await classify(content, recentMessages, registry, classifyConfig, classifierLlmConfig, log);
+        const lastAssistantReply = lastAssistantReplyBySession.get(sessionKey);
+        result = await classify(content, recentMessages, registry, classifyConfig, classifierLlmConfig, log, lastAssistantReply);
     }
     log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);
     // ── V4: UI Strategy ──
@@ -506,6 +545,9 @@ async function handleBeforeDispatchInner(params) {
     if (topic) {
         const newSessionKey = topic.sessionKey;
         log(`[hook-handler] Routing to topic session: ${sessionKey} → ${newSessionKey}`);
+        // Record the routed→inbound key mapping so the output hook (which only sees the
+        // routed key) can store the assistant reply under the inbound key classify() reads.
+        rememberRouting(sessionKey, newSessionKey);
         return {
             handled: false,
             sessionKey: newSessionKey,

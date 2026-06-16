@@ -22,6 +22,6 @@ export declare function matchKeywords(content: string, topics: TopicEntry[]): Cl
 export declare function detectContinuation(content: string, _recentMessages: string[], activeTopic: TopicEntry | null): ClassifyResult | null;
 export declare function detectShortFollowUp(content: string, activeTopic: TopicEntry | null, recentlyActive: boolean): ClassifyResult | null;
 export declare function isLLMCircuitOpen(): boolean;
-export declare function classify(content: string, recentMessages: string[], registry: TopicRegistry, config: TopicRouterConfig, llmConfig?: LLMConfig, log?: (...args: unknown[]) => void): Promise<ClassifyResult>;
+export declare function classify(content: string, recentMessages: string[], registry: TopicRegistry, config: TopicRouterConfig, llmConfig?: LLMConfig, log?: (...args: unknown[]) => void, lastAssistantReply?: string): Promise<ClassifyResult>;
 export declare function generateTopicLabel(content: string): string;
 export declare function determineUIStrategy(result: ClassifyResult, thresholds: AdaptiveThresholds): UIStrategy;
