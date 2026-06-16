@@ -68,7 +68,13 @@ echo ""
 
 # ── Step 1: Get code ──
 echo "[1/3] Getting code..."
-git config --global http.sslVerify false 2>/dev/null || true
+# SSL verification stays ON by default. Disabling it globally exposed every later
+# git operation (and any other tool reading global git config) to MITM. Only turn it
+# off when explicitly opted in for a known self-signed mirror, via TOPIC_ROUTER_INSECURE_GIT=1.
+if [ "${TOPIC_ROUTER_INSECURE_GIT:-}" = "1" ]; then
+  warn "TOPIC_ROUTER_INSECURE_GIT=1: disabling git SSL verification (insecure — MITM possible)"
+  git config --global http.sslVerify false 2>/dev/null || true
+fi
 git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 
 # Derive tarball URL from REPO_URL (only works for GitHub)

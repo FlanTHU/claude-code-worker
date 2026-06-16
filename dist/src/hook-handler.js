@@ -512,7 +512,7 @@ async function handleBeforeDispatchInner(params) {
                 if (name !== fallbackName) {
                     registry.updateDisplayName(created.label, name);
                 }
-            }).catch(() => { });
+            }).catch(err => log(`[hook-handler] deriveDisplayName failed for "${created.label}", keeping fallback name: ${err?.message ?? err}`));
             break;
         }
         default:
@@ -535,7 +535,7 @@ async function handleBeforeDispatchInner(params) {
             if (keywords.length > 0) {
                 registry.setKeywords(topicLabel, keywords);
             }
-        }).catch(() => { });
+        }).catch(err => log(`[hook-handler] extractKeywords failed for "${topicLabel}", keeping rule-based keywords: ${err?.message ?? err}`));
     }
     else {
         log(`[hook-handler] Skip keyword learning (weak sticky continue, conf=${result.confidence})`);

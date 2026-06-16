@@ -13,6 +13,8 @@
  * back into the old one — exactly the topic-collapse failure the runaway valve fixed.
  */
 
+import type { OpenClawEvent } from './types.js';
+
 /** Phrases where the agent explicitly states it lacks prior/conversation context. */
 const NO_CONTEXT_PATTERNS: RegExp[] = [
   // Chinese — explicit "no previous context / new session / don't know what you refer to"
@@ -43,7 +45,7 @@ export function looksLikeNoContext(text: string): boolean {
  * Pull the assistant's reply text out of the various output-hook event shapes
  * (llm_output / agent_end / reply). Returns '' if none found.
  */
-export function extractAssistantText(event: any): string {
+export function extractAssistantText(event: OpenClawEvent): string {
   if (!event || typeof event !== 'object') return '';
 
   if (typeof event.lastAssistant === 'string' && event.lastAssistant) {

@@ -1,4 +1,4 @@
-import type { TopicRouterConfig, HookResult, LastRouteInfo } from './types.js';
+import type { TopicRouterConfig, HookResult, LastRouteInfo, OpenClawEvent, OpenClawContext } from './types.js';
 import type { TopicRegistry } from './topic-registry.js';
 import { classify, generateTopicLabel, determineUIStrategy } from './classifier.js';
 import { isTargetSession } from './utils.js';
@@ -359,8 +359,8 @@ async function deriveDisplayName(
  * - Footer added via separate output hook
  */
 interface HandleParams {
-  event: any;
-  ctx: any;
+  event: OpenClawEvent;
+  ctx: OpenClawContext;
   registry: TopicRegistry;
   config: TopicRouterConfig;
   stateDir: string;
@@ -628,7 +628,7 @@ async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResu
         if (name !== fallbackName) {
           registry.updateDisplayName(created.label, name);
         }
-      }).catch(() => {});
+      }).catch(err => log(`[hook-handler] deriveDisplayName failed for "${created.label}", keeping fallback name: ${err?.message ?? err}`));
       break;
     }
 
@@ -654,7 +654,7 @@ async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResu
       if (keywords.length > 0) {
         registry.setKeywords(topicLabel!, keywords);
       }
-    }).catch(() => {});
+    }).catch(err => log(`[hook-handler] extractKeywords failed for "${topicLabel}", keeping rule-based keywords: ${err?.message ?? err}`));
   } else {
     log(`[hook-handler] Skip keyword learning (weak sticky continue, conf=${result.confidence})`);
   }

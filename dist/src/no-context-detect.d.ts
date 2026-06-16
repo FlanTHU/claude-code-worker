@@ -12,10 +12,11 @@
  * asks clarifying questions; treating those as mis-routes would merge real new topics
  * back into the old one — exactly the topic-collapse failure the runaway valve fixed.
  */
+import type { OpenClawEvent } from './types.js';
 /** True if the text explicitly declares a lack of prior context. */
 export declare function looksLikeNoContext(text: string): boolean;
 /**
  * Pull the assistant's reply text out of the various output-hook event shapes
  * (llm_output / agent_end / reply). Returns '' if none found.
  */
-export declare function extractAssistantText(event: any): string;
+export declare function extractAssistantText(event: OpenClawEvent): string;

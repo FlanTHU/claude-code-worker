@@ -60,6 +60,44 @@ export interface HookEvent {
     isGroup: boolean;
     timestamp: number;
 }
+/**
+ * The inbound event passed to before_dispatch / output hooks by the OpenClaw gateway.
+ * The gateway has no published TS types, so this captures the fields the router actually
+ * reads. Most are optional because their presence varies by event shape (before_dispatch
+ * vs llm_output vs agent_end). The index signature keeps dynamic probing (`event[k]`,
+ * `Object.keys(event)` for quote-field discovery) type-safe without falling back to `any`.
+ */
+export interface OpenClawEvent {
+    content?: string;
+    body?: string;
+    cleanedBody?: string;
+    sessionKey?: string;
+    quotedContent?: string;
+    quotedMessage?: string;
+    parentContent?: string;
+    quote?: string;
+    replyContent?: string;
+    quoteText?: string;
+    replyText?: string;
+    reply?: {
+        content?: string;
+        text?: string;
+        body?: string;
+    };
+    lastAssistant?: string;
+    assistantTexts?: unknown[];
+    messages?: Array<{
+        role?: string;
+        content?: unknown;
+    }>;
+    text?: string;
+    [key: string]: unknown;
+}
+/** Gateway-provided context for a hook invocation. Only sessionKey is consumed. */
+export interface OpenClawContext {
+    sessionKey?: string;
+    [key: string]: unknown;
+}
 export interface HookContext {
     channelId: string;
     accountId: string;

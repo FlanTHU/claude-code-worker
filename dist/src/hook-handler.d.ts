@@ -1,4 +1,4 @@
-import type { TopicRouterConfig, HookResult } from './types.js';
+import type { TopicRouterConfig, HookResult, OpenClawEvent, OpenClawContext } from './types.js';
 import type { TopicRegistry } from './topic-registry.js';
 import type { LLMConfig } from './llm-client.js';
 import type { FeedbackStore } from './feedback-store.js';
@@ -26,8 +26,8 @@ export declare function deriveDisplayNameFallback(content: string): string;
  * - Footer added via separate output hook
  */
 interface HandleParams {
-    event: any;
-    ctx: any;
+    event: OpenClawEvent;
+    ctx: OpenClawContext;
     registry: TopicRegistry;
     config: TopicRouterConfig;
     stateDir: string;

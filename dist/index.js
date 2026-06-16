@@ -54,7 +54,9 @@ export default definePluginEntry({
                     try {
                         writeToggle(toggleFile, true);
                     }
-                    catch { }
+                    catch (err) {
+                        log.error(`[topic-router] Failed to persist toggle=on to ${toggleFile}:`, err);
+                    }
                     return { text: '✅ 话题路由已**开启**' };
                 }
                 if (arg === 'off') {
@@ -62,7 +64,9 @@ export default definePluginEntry({
                     try {
                         writeToggle(toggleFile, false);
                     }
-                    catch { }
+                    catch (err) {
+                        log.error(`[topic-router] Failed to persist toggle=off to ${toggleFile}:`, err);
+                    }
                     return { text: '⏸️ 话题路由已**关闭**，消息将直接进入默认 session' };
                 }
                 if (arg === 'reset') {

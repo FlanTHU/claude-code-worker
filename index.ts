@@ -5,7 +5,7 @@ import { handleBeforeDispatch, getRecentAutoNew, clearRecentAutoNew, setPendingF
 import { FeedbackStore } from './src/feedback-store.js';
 import { ContextBridge } from './src/context-bridge.js';
 import { looksLikeNoContext, extractAssistantText } from './src/no-context-detect.js';
-import type { TopicRouterConfig } from './src/types.js';
+import type { TopicRouterConfig, OpenClawEvent, OpenClawContext } from './src/types.js';
 import type { LLMConfig } from './src/llm-client.js';
 import { resolveClassifierLlmConfig } from './src/llm-client.js';
 
@@ -63,12 +63,14 @@ export default definePluginEntry({
         const arg = (ctx.args ?? '').trim().toLowerCase();
         if (arg === 'on') {
           runtimeEnabled = true;
-          try { writeToggle(toggleFile, true); } catch {}
+          try { writeToggle(toggleFile, true); }
+          catch (err) { log.error(`[topic-router] Failed to persist toggle=on to ${toggleFile}:`, err); }
           return { text: '✅ 话题路由已**开启**' };
         }
         if (arg === 'off') {
           runtimeEnabled = false;
-          try { writeToggle(toggleFile, false); } catch {}
+          try { writeToggle(toggleFile, false); }
+          catch (err) { log.error(`[topic-router] Failed to persist toggle=off to ${toggleFile}:`, err); }
           return { text: '⏸️ 话题路由已**关闭**，消息将直接进入默认 session' };
         }
         if (arg === 'reset') {
@@ -272,7 +274,7 @@ export default definePluginEntry({
 
     log.info(`[topic-router] Classifier: ${classifierLlmConfig.model} (cluster=${cluster}, baseUrl=${classifierLlmConfig.baseUrl}) | Reply: session routing (full agent pipeline)`);
 
-    const hookHandler = async (event: any, ctx: any) => {
+    const hookHandler = async (event: OpenClawEvent, ctx: OpenClawContext) => {
       if (!readToggle(toggleFile)) return undefined;
       log.info(`[topic-router] before_dispatch fired, cleanedBody="${(event.cleanedBody ?? '').slice(0, 50)}"`);
       try {
@@ -298,7 +300,7 @@ export default definePluginEntry({
 
     // ── Output hook: append topic footer to replies from topic sessions ──
     if (pluginConfig.replyFooter) {
-      const outputHandler = (event: any, ctx: any) => {
+      const outputHandler = (event: OpenClawEvent, ctx: OpenClawContext) => {
         if (!readToggle(toggleFile)) return;
         const sessionKey: string = ctx?.sessionKey || event?.sessionKey || '';
         log.info(`[topic-router-output] hook fired. sessionKey="${sessionKey}" eventKeys=${JSON.stringify(Object.keys(event ?? {}))} ctxKeys=${JSON.stringify(Object.keys(ctx ?? {}))}`);

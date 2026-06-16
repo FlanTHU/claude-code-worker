@@ -47,7 +47,9 @@ export class ConversationStore {
     this.cache.delete(label);
     this.dirty.delete(label);
     const filePath = this.filePath(label);
-    try { fs.unlinkSync(filePath); } catch {}
+    // Missing file is fine (already gone); only a real error is worth surfacing.
+    try { fs.unlinkSync(filePath); }
+    catch (err: any) { if (err?.code !== 'ENOENT') console.error(`[topic-router] Failed to delete conversation ${label}:`, err); }
   }
 
   flushSync(): void {
@@ -94,6 +96,8 @@ export class ConversationStore {
       const tmp = this.filePath(label) + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
       fs.renameSync(tmp, this.filePath(label));
-    } catch {}
+    } catch (err) {
+      console.error(`[topic-router] Failed to persist conversation ${label}:`, err);
+    }
   }
 }

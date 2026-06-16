@@ -45,7 +45,12 @@ echo ""
 # ── Step 1: Clone or update repo ──
 echo "[1/5] Fetching code..."
 git config --global --add safe.directory "$GIT_ROOT" 2>/dev/null || true
-git config --global http.sslVerify false 2>/dev/null || true
+# SSL verification stays ON by default; only disabled when explicitly opted in for a
+# known self-signed mirror (TOPIC_ROUTER_INSECURE_GIT=1). See deploy.sh for rationale.
+if [ "${TOPIC_ROUTER_INSECURE_GIT:-}" = "1" ]; then
+  echo "  ⚠️  TOPIC_ROUTER_INSECURE_GIT=1: disabling git SSL verification (insecure — MITM possible)"
+  git config --global http.sslVerify false 2>/dev/null || true
+fi
 
 if [ -d "$GIT_ROOT/.git" ]; then
   cd "$GIT_ROOT"
