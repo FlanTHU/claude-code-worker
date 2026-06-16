@@ -13,12 +13,16 @@ const ADAPT_INTERVAL = 20;
 
 /** Single source of truth for default thresholds. Exported so the classifier can
  *  use the SAME defaults when no adaptive value is injected — otherwise toggling
- *  self-learning on/off would step the saturation thresholds (classifier used to
- *  fall back to 10min/5 while this default is 5min/3). */
+ *  self-learning on/off would step the saturation thresholds.
+ *  saturationMessageCount/IdleMinutes were 3/5 — far too eager: a topic with just 3
+ *  messages idle 5min got auto-split, so coming back ~15min later to ask a follow-up
+ *  about the same subject spawned a new topic. Raised to 6/15 to match real chat rhythm
+ *  (people pause and return). Self-learning still moves saturationMessageCount within
+ *  [2,8], so 6 leaves room both ways. */
 export const DEFAULT_THRESHOLDS: AdaptiveThresholds = {
   confidenceThreshold: 0.6,
-  saturationMessageCount: 3,
-  saturationIdleMinutes: 5,
+  saturationMessageCount: 6,
+  saturationIdleMinutes: 15,
   hintThresholdLow: 0.5,
   hintThresholdHigh: 0.75,
   lastAdjustedAt: 0,

@@ -345,6 +345,33 @@ async function testShortFollowUpFragment() {
     `Recent short fragment "郑州哪" → continue weather (got ${r.action}/${r.targetLabel})`);
 }
 
+async function testShortModelNameKeyword() {
+  console.log('\n=== Short model-name keyword (yu7/gt) + saturation rhythm ===');
+  resetState();
+  const registry = new TopicRegistry(STATE_DIR);
+  registry.getOrCreate('su7', '小米yu7 gt');
+  // Learn from a message that names the model — the OLD ≥4-letter rule dropped yu7/gt.
+  registry.learnKeywords('su7', '帮我估算 yu7 gt 的销量');
+  const kw = registry.get('su7')!.keywords;
+  assert(kw.includes('yu7') && kw.includes('gt'),
+    `short model names learned as keywords (got ${JSON.stringify(kw)})`);
+
+  // Make the topic look "saturated" under the OLD thresholds (3 msgs / 5min idle) but
+  // NOT under the new ones (6 / 15min): a 3-msg topic idle 8min that names the model again
+  // must stay, not auto-new. This is the real YU7 GT bug.
+  const data = JSON.parse(fs.readFileSync(`${STATE_DIR}/topic-sessions.json`, 'utf-8'));
+  data.topics['su7'].messageCount = 3;
+  data.topics['su7'].lastActiveAt = Date.now() - 8 * 60 * 1000; // 8 min ago
+  fs.writeFileSync(`${STATE_DIR}/topic-sessions.json`, JSON.stringify(data));
+
+  // setActive wasn't called, so the engine may route via keyword match (switch) rather
+  // than continue — either way the point is it lands on the RIGHT topic and is NOT a new
+  // one. Pre-fix this returned action:new (saturation, zero keyword overlap).
+  const r = await classify('我让你估算YU7 GT的销量，专注在这一款车型', [], registry, config);
+  assert(r.action !== 'new' && r.targetLabel === 'su7',
+    `follow-up naming yu7/gt → stays on su7, not new (got ${r.action}/${r.targetLabel}, reason=${r.reason})`);
+}
+
 async function testCarryOverFromAssistantReply() {
   console.log('\n=== L1.6: Carry-over from assistant reply ===');
   resetState();
@@ -499,8 +526,8 @@ function testFeedbackStore() {
   store2.getThresholds().saturationMessageCount = 8; // 模拟被 bug 推高
   store2.reset();
   assert(store2.getStats().totalRoutes === 0, `reset 后 totalRoutes 归零`);
-  assert(store2.getThresholds().saturationMessageCount === 3, `reset 后 saturationMessageCount 回默认3 (got ${store2.getThresholds().saturationMessageCount})`);
-  assert(store2.getThresholds().saturationIdleMinutes === 5, `reset 后 idle 回默认5`);
+  assert(store2.getThresholds().saturationMessageCount === 6, `reset 后 saturationMessageCount 回默认6 (got ${store2.getThresholds().saturationMessageCount})`);
+  assert(store2.getThresholds().saturationIdleMinutes === 15, `reset 后 idle 回默认15 (got ${store2.getThresholds().saturationIdleMinutes})`);
   assert(store2.getLastRoute('s') === null, `reset 后 lastRoute 清空`);
 }
 
@@ -534,6 +561,7 @@ async function main() {
   testFallbackName();
   testFeedbackStore();
   await testShortFollowUpFragment();
+  await testShortModelNameKeyword();
   await testCarryOverFromAssistantReply();
   await testHookPassthroughAndShortFollowUp();
   testSlashLabelGuard();

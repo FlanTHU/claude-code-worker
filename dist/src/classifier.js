@@ -41,7 +41,9 @@ function countSignalOverlap(content, replyText) {
         return 0;
     const reply = replyText.toLowerCase();
     const tokens = new Set();
-    for (const m of content.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])
+    // Letter-led alphanumeric (≥2, captures yu7/gt/su7) + CJK runs ≥2. Mirrors the token
+    // shapes keyword learning uses, so overlap counting sees the same model names.
+    for (const m of content.toLowerCase().match(/[a-z][a-z0-9]{1,}/g) ?? [])
         tokens.add(m);
     for (const run of content.match(/[一-龥]{2,}/g) ?? [])
         tokens.add(run.toLowerCase());

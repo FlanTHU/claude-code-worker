@@ -25,6 +25,13 @@ export const STOPWORDS = new Set([
     'this', 'that', 'what', 'which', 'have', 'been', 'with',
     'from', 'they', 'will', 'would', 'could', 'should',
     'about', 'there', 'their', 'some', 'other', 'than',
+    // Short English function words: needed because keyword extraction now keeps
+    // letter-led tokens ≥2 chars (to capture short model names like yu7/gt/su7),
+    // which would otherwise let these high-frequency fillers become keywords.
+    'is', 'it', 'to', 'of', 'in', 'on', 'at', 'by', 'or', 'as', 'an', 'be',
+    'do', 'so', 'no', 'my', 'me', 'we', 'he', 'us', 'if', 'up', 'the', 'and',
+    'for', 'you', 'are', 'was', 'can', 'how', 'why', 'who', 'not', 'but', 'all',
+    'get', 'out', 'now', 'one', 'has', 'its', 'too', 'any', 'use', 'let',
 ]);
 /** Chinese characters that are common conjunctions/particles and should break segments.
  * Excludes chars that commonly appear in compound words (能→智能/功能, 不→不同). */
@@ -216,8 +223,13 @@ export class TopicRegistry {
         if (!entry)
             return;
         const words = [];
-        // Extract English words (>= 4 chars, skip common words)
-        const engMatches = content.match(/[a-zA-Z]{4,}/g);
+        // Extract Latin/alphanumeric tokens: letter-led, ≥2 chars, digits allowed. This keeps
+        // short model names and codes that are a topic's real identifier — yu7, su7, gt, ev,
+        // m7 — which the old ≥4-letter rule dropped (so a "小米yu7-gt" topic never learned
+        // "yu7"/"gt", and a follow-up naming them counted as zero keyword overlap → wrong
+        // auto-new). Pure numbers (2026, 38) are excluded by the leading-letter requirement;
+        // short function words (is/to/the/and…) are filtered out via STOPWORDS below.
+        const engMatches = content.match(/[a-zA-Z][a-zA-Z0-9]{1,}/g);
         if (engMatches) {
             words.push(...engMatches.map(w => w.toLowerCase()));
         }
@@ -244,10 +256,17 @@ export class TopicRegistry {
                 return false;
             if (STOPWORDS.has(w))
                 return false;
-            // Filter keywords that start or end with a stopword (indicates bad segmentation)
-            for (const sw of STOPWORDS) {
-                if (w.startsWith(sw) || w.endsWith(sw))
-                    return false;
+            // Drop segments that start or end with a stopword — but ONLY for CJK words. This
+            // catches bad Chinese segmentation (e.g. "的天气"), where a stopword prefix/suffix
+            // signals a split error. For Latin tokens this substring test is wrong: it would
+            // kill legitimate words that merely contain a short stopword as a substring
+            // (python ends with "on", button with "on", domain with "in"). Latin tokens are
+            // already filtered by the exact STOPWORDS.has(w) check above.
+            if (/[一-鿿]/.test(w)) {
+                for (const sw of STOPWORDS) {
+                    if (w.startsWith(sw) || w.endsWith(sw))
+                        return false;
+                }
             }
             return true;
         });
