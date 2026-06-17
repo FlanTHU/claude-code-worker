@@ -259,15 +259,39 @@ async function deriveDisplayName(content, llmConfig, log) {
         const reasoningText = (msg?.reasoning_content ?? '').trim();
         if (!contentText && !reasoningText)
             return fallback;
-        const clean = (s) => s.trim().replace(/^["“”「」『』\s]+|["“”「」『』\s]+$/g, '');
+        const clean = (s) => s.trim()
+            // Strip a leading markdown list/bullet marker ("- ", "* ", "1. ", "1、"):
+            // a reasoning draft line ("- 或许用中文短语：") can otherwise slip through as a name.
+            .replace(/^[-*•]\s+/, '')
+            .replace(/^\d+[.、)]\s*/, '')
+            // Strip surrounding quotes/brackets and whitespace.
+            .replace(/^["“”「」『』\s]+|["“”「」『』\s]+$/g, '')
+            // Strip a dangling trailing colon/comma — these end a draft fragment, never a title.
+            .replace(/[：:，,、]+$/, '')
+            .trim();
+        // A reasoning-tail line that still looks like an unfinished thought (started as a
+        // list item, or ends mid-clause) is a draft, not a title. mimo sometimes leaves
+        // `content` empty and its last reasoning line is "- 或许用中文短语：" — reject those
+        // and fall back to the rule-based name instead of leaking the draft as the topic name.
+        const looksLikeDraft = (s) => /^[-*•]|[：:，,、]$/.test(s.trim()) || /或许|也许|可以叫|考虑|比如|例如/.test(s);
         // content 优先：新 prompt 下 content 就是干净标题（可能含首尾引号/书名号）。
         // 仅当 content 为空（mimo 偶发把答案放进 reasoning）才回退到 reasoning 末行。
         let answer = clean(contentText);
         let from = 'content';
         if (!answer) {
+            // mimo occasionally leaves content empty and puts everything in reasoning. The
+            // last non-empty reasoning line is USUALLY the concluded title, but can be an
+            // unfinished draft fragment ("- 或许用中文短语："). Take the last line only if it
+            // doesn't look like a draft; otherwise leave answer empty → rule-based fallback.
             const lines = reasoningText.split('\n').filter((l) => l.trim());
-            answer = clean(lines[lines.length - 1] ?? '');
-            from = 'reasoning';
+            const lastLine = lines[lines.length - 1] ?? '';
+            if (lastLine && !looksLikeDraft(lastLine)) {
+                answer = clean(lastLine);
+                from = 'reasoning';
+            }
+            else if (lastLine) {
+                log(`[hook-handler] Reasoning tail looks like a draft, not a title: "${lastLine.slice(0, 40)}" → fallback`);
+            }
         }
         if (answer && answer.length <= 12 && answer.length >= 2) {
             log(`[hook-handler] Generated display name: "${answer}" (from ${from})`);
