@@ -176,16 +176,26 @@ with open('$OCJSON', 'w') as f:
 " 2>/dev/null && echo "  Config: topic-router enabled" || true
 fi
 
-# Start gateway directly — no external script dependency
+# Start gateway directly — no external script dependency.
+# Wrap in `setsid` + stdin from /dev/null so the gateway becomes its own session
+# leader and detaches from the controlling terminal. When redeploy.sh is driven over
+# a webtty/SSH session (e.g. via claw-run), that session ends right after the script
+# returns and sends SIGHUP to its process group — `& disown` alone does NOT shield the
+# child from that, so the freshly-started gateway was getting killed (empty /tmp/gw.log,
+# nothing listening on the port). setsid puts it in a new session with no controlling
+# terminal, so the SIGHUP never reaches it. `setsid` falls back gracefully if absent.
 export HOME=/root
 export SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts
 export XDG_DATA_HOME=/root/.openclaw/xdg-data
 
+SETSID=""
+command -v setsid &>/dev/null && SETSID="setsid"
+
 if command -v runuser &>/dev/null && id node &>/dev/null 2>&1; then
-  runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR="$SYSTEM_PROMPTS_DIR" XDG_DATA_HOME="$XDG_DATA_HOME" \
-    openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
+  $SETSID runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR="$SYSTEM_PROMPTS_DIR" XDG_DATA_HOME="$XDG_DATA_HOME" \
+    openclaw gateway --port "$GW_PORT" --verbose >/tmp/gw.log 2>&1 </dev/null &
 else
-  openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
+  $SETSID openclaw gateway --port "$GW_PORT" --verbose >/tmp/gw.log 2>&1 </dev/null &
 fi
 disown
 
