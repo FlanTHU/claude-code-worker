@@ -193,11 +193,19 @@ chmod +x "$GW_SCRIPT"
 ln -sf "$GW_SCRIPT" /tmp/sg.sh
 
 : > /tmp/gw.log
+# Detach gateway into its own session so the parent shell can return. With
+# `curl | bash` the script's stdin is the pipe; a backgrounded daemon that
+# inherits that pipe fd while staying in the same session keeps the pipeline
+# open, so the terminal never returns — it looks like the script hung. setsid
+# (new session, no controlling tty) + </dev/null (drop the inherited pipe stdin)
+# fixes it. redeploy.sh already does this; bootstrap.sh was missed.
+SETSID=""
+command -v setsid &>/dev/null && SETSID="setsid"
 if [ "${GW_RUN_CMD:-}" = "direct" ] || ! command -v runuser &>/dev/null || ! id node &>/dev/null 2>&1; then
-  "$GW_SCRIPT" &>/tmp/gw.log &
+  $SETSID "$GW_SCRIPT" >/tmp/gw.log 2>&1 </dev/null &
 else
-  runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts XDG_DATA_HOME=/root/.openclaw/xdg-data \
-    openclaw gateway --port "$GW_PORT" --verbose &>/tmp/gw.log &
+  $SETSID runuser -u node -- env HOME=/root SYSTEM_PROMPTS_DIR=/root/.openclaw/system-prompts XDG_DATA_HOME=/root/.openclaw/xdg-data \
+    openclaw gateway --port "$GW_PORT" --verbose >/tmp/gw.log 2>&1 </dev/null &
 fi
 disown
 
