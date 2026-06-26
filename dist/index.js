@@ -277,6 +277,13 @@ export default definePluginEntry({
                     return;
                 const sessionKey = ctx?.sessionKey || event?.sessionKey || '';
                 log.info(`[topic-router-output] hook fired. sessionKey="${sessionKey}" eventKeys=${JSON.stringify(Object.keys(event ?? {}))} ctxKeys=${JSON.stringify(Object.keys(ctx ?? {}))}`);
+                // Group/channel replies must NOT get a topic footer. topic-router is direct-only;
+                // before_dispatch already rejects group/channel inbound, but this output hook is a
+                // separate path — without the same guard it falls through to registry.getActive()
+                // below and stamps the global active topic's footer onto a group reply (observed
+                // 2026-06-26: a group weather reply got the unrelated "限制无法绕过" footer).
+                if (sessionKey.includes(':group:') || sessionKey.includes(':channel:'))
+                    return;
                 // Try to find topic label from session key or registry active
                 let label;
                 if (sessionKey.includes(':topic:')) {
