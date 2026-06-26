@@ -4,6 +4,7 @@
  */
 
 import { classify, parseExplicitCommand, matchKeywords, detectContinuation, generateTopicLabel } from './src/classifier.js';
+import { isTargetSession } from './src/utils.js';
 import { TopicRegistry } from './src/topic-registry.js';
 import { handleBeforeDispatch, deriveDisplayNameFallback } from './src/hook-handler.js';
 import { FeedbackStore } from './src/feedback-store.js';
@@ -554,8 +555,26 @@ function testSlashLabelGuard() {
   assert(generateTopicLabel('帮我看看这段 python 代码') === 'coding', `coding content → coding (got ${generateTopicLabel('帮我看看这段 python 代码')})`);
 }
 
+function testIsTargetSession() {
+  // topic-router is direct-only. Group/channel sessions must be rejected so a group-chat
+  // interaction can't create topics or switch the global active pointer (2026-06-26 bug:
+  // a group reply switched active to an unrelated topic, then a DM follow-up routed there).
+  console.log('\n=== isTargetSession: direct-only routing ===');
+  const T = 'agent:main:main';
+  // Accept: direct DMs and the bare inbound keys
+  assert(isTargetSession('agent:main:feishu:direct:ou_abc', T) === true, 'direct DM → routed');
+  assert(isTargetSession('agent:main:main', T) === true, 'agent:main:main → routed');
+  assert(isTargetSession('agent:main:main:hook-short', T) === true, 'agent:main:main:* → routed');
+  // Reject: group / channel / our own topic sessions / empty
+  assert(isTargetSession('agent:main:feishu:group:gc_xyz', T) === false, 'group chat → NOT routed');
+  assert(isTargetSession('agent:main:feishu:channel:ch_xyz', T) === false, 'channel → NOT routed');
+  assert(isTargetSession('agent:main:topic:weather', T) === false, 'our topic session → NOT routed');
+  assert(isTargetSession('', T) === false, 'empty sessionKey → NOT routed');
+}
+
 async function main() {
   await testL0();
+  testIsTargetSession();
   await testNoTopics();
   await testContinuation();
   await testKeywordMatch();
