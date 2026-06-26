@@ -171,7 +171,8 @@ const SWITCH_SIGNALS = [
 const REFERENCE_SIGNALS = [
   '之前说的', '之前提到', '之前讲的', '之前那个', '之前的那', '之前聊的', '之前说过',
   '刚才说的', '刚才提到', '刚才那个', '刚才讲的', '刚说的', '刚提到', '刚才的那',
-  '你刚才', '你刚说', '你说的那', '你提到的', '你提到过', '你刚提',
+  '刚刚说', '刚刚提', '刚刚讲', '刚刚那', '刚刚的', '刚刚发的', '你刚刚', '你刚发',
+  '你刚才', '你刚说', '你说的那', '你提到的', '你提到过', '你刚提', '你发的那', '你发的消息',
   '上面说的', '上面提到', '上面那个', '前面说的', '前面提到', '前面那个',
   '我们刚才', '我们之前', '咱们刚才', '咱们之前',
   '接着上面', '接着刚才', '顺着刚才', '顺着上面',
@@ -304,7 +305,8 @@ async function classifyWithLLM(
   recentMessages: string[],
   llmConfig: LLMConfig,
   log: (...args: unknown[]) => void,
-  lastAssistantReply?: string
+  lastAssistantReply?: string,
+  freshAutoNewParent?: { label: string; displayName: string } | null
 ): Promise<ClassifyResult | null> {
   const baseUrl = llmConfig.baseUrl ?? DEFAULT_BASE_URL;
   const model = llmConfig.model ?? DEFAULT_MODEL;
@@ -344,9 +346,18 @@ async function classifyWithLLM(
     ? `\n上一条助手回复（新消息可能是对它的承接/追问）:\n  ${lastAssistantReply.slice(0, 300)}`
     : '';
 
+  // Misroute-rescue context: the current active topic was auto-created from a parent
+  // ONE message ago and is still empty. If this new message is following up on / asking
+  // about / challenging that parent (the classic "你刚刚那条怎么回事" after a misroute),
+  // it almost certainly belongs to the parent — switch back. Only nudges; the LLM still
+  // judges semantically, so a genuinely-new second message stays put (no topic-collapse).
+  const freshForkCtx = freshAutoNewParent
+    ? `\n注意：当前活跃话题是上一条消息刚自动新建的空话题，从父话题「${freshAutoNewParent.displayName}」(${freshAutoNewParent.label}) 分出。若这条新消息是在承接/追问/质疑父话题的内容（例如对刚才那轮回复或路由本身的追问），它很可能本属于父话题 → 判 switch 到 ${freshAutoNewParent.label}；只有当它确实开启了与父话题无关的新主题时才判 new。`
+    : '';
+
   const userPrompt = `已有话题：
 ${topicSummary || '（暂无话题）'}
-${recentCtx}${lastReplyCtx}
+${recentCtx}${lastReplyCtx}${freshForkCtx}
 
 新消息：${content}
 
@@ -458,7 +469,8 @@ export async function classify(
   config: TopicRouterConfig,
   llmConfig?: LLMConfig,
   log?: (...args: unknown[]) => void,
-  lastAssistantReply?: string
+  lastAssistantReply?: string,
+  freshAutoNewParent?: { label: string; displayName: string } | null
 ): Promise<ClassifyResult> {
   const noop = () => {};
   const _log = log ?? noop;
@@ -642,7 +654,7 @@ export async function classify(
       _log(`[classifier-llm] Circuit open, skipping LLM (cooldown 60s)`);
     } else {
       const llmResult = await classifyWithLLM(
-        content, activeTopic, allTopics, recentMessages, llmConfig, _log, lastAssistantReply
+        content, activeTopic, allTopics, recentMessages, llmConfig, _log, lastAssistantReply, freshAutoNewParent
       );
       if (llmResult) return llmResult;
     }

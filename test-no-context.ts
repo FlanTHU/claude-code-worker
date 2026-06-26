@@ -25,6 +25,11 @@ const positives = [
   'This is a new session, I have no prior context.',
   "Sorry, I don't have access to the previous conversation.",
   'I lack any earlier context for this request.',
+  // Real bug repro (2026-06): mixed CN/EN "新 session" + "上一轮" phrasing the old
+  // regex missed, so auto-switch-back never fired. Both forms must now be detected.
+  '抱歉老板，这是我新 session 的第一条消息，我没有上一轮对话的上下文了。',
+  '这是一个全新对话，我没有上一条对话的记录。',
+  '我没有你刚刚发的那条消息的上下文。',
 ];
 for (const t of positives) {
   assert(looksLikeNoContext(t), `detect: "${t.slice(0, 24)}…"`);
@@ -43,6 +48,7 @@ const negatives = [
   'Which folder should I upload the file to?',
   'I can do that — what should the spreadsheet be named?',
   '武汉总部今天食堂的菜单是：宫保鸡丁、麻婆豆腐……',
+  '这是我们这次要做的新功能介绍，分三块。',  // "新功能" must NOT match the new-session pattern
 ];
 for (const t of negatives) {
   assert(!looksLikeNoContext(t), `ignore: "${t.slice(0, 24)}…"`);

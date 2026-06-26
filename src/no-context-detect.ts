@@ -18,9 +18,9 @@ import type { OpenClawEvent } from './types.js';
 /** Phrases where the agent explicitly states it lacks prior/conversation context. */
 const NO_CONTEXT_PATTERNS: RegExp[] = [
   // Chinese — explicit "no previous context / new session / don't know what you refer to"
-  /没有(之前|先前|此前|过往|过去)的?(上下文|对话|聊天|对话记录|消息记录|交流)/,
-  /没有(你|您)(之前|先前|刚才)(说|提到|讲)/,
-  /(这是|这是一个|当前是|目前是)(一个)?(新的?会话|新的?对话|全新的?会话)/,
+  /没有(之前|先前|此前|过往|过去|上一轮|上一条|上轮|上次)的?(上下文|对话|聊天|对话记录|消息记录|交流)/,
+  /没有(你|您)(之前|先前|刚才|刚刚)(说|提到|讲|发)/,
+  /(这是|这是一个|当前是|目前是)(我)?(一个)?(新的?|全新的?)\s?(会话|对话|session|聊天|对话框)/i,
   /(缺少|缺乏|没有|不具备)(相关|足够的?|必要的?)?(上下文|背景信息|对话历史|历史记录)/,
   /(我|这边)(没有|无法获取|看不到|拿不到)(之前|先前|你之前|你刚才)/,
   /不(知道|清楚|了解)(你|您)(指的?是|说的?是|提到的?是|之前)/,

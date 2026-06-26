@@ -526,7 +526,24 @@ async function handleBeforeDispatchInner(params: HandleParams): Promise<HookResu
       ? { ...config, _adaptiveThresholds: feedbackStore.getThresholds() }
       : config;
     const lastAssistantReply = lastAssistantReplyBySession.get(sessionKey);
-    result = await classify(content, recentMessages, registry, classifyConfig, classifierLlmConfig, log, lastAssistantReply);
+    // Misroute-rescue: if the active topic was auto-created from a parent one message ago
+    // and is still empty, tell the classifier so a follow-up/challenge to the parent can
+    // switch back semantically — without relying on the agent's no-context wording regex
+    // (the output-hook valve that misses novel phrasings). LLM-judged, so a genuinely-new
+    // second message stays put: no topic-collapse. Reuses the classify call already made.
+    // messageCount<=1: the misrouted FIRST message already bumped the fresh topic's count
+    // to 1 (getOrCreate increments), so this is the immediately-following second message —
+    // exactly the rescue window. >1 means real conversation accrued; no longer a misroute.
+    let freshAutoNewParent: { label: string; displayName: string } | null = null;
+    const activeForRescue = registry.getActive();
+    if (activeForRescue && (activeForRescue.messageCount ?? 0) <= 1) {
+      const autoNew = getRecentAutoNew(activeForRescue.sessionKey);
+      if (autoNew && autoNew.newLabel === activeForRescue.label) {
+        freshAutoNewParent = { label: autoNew.previousLabel, displayName: autoNew.previousDisplayName };
+        log(`[hook-handler] Misroute-rescue armed: active "${activeForRescue.label}" is fresh auto-new from "${autoNew.previousLabel}"; classifier may switch back`);
+      }
+    }
+    result = await classify(content, recentMessages, registry, classifyConfig, classifierLlmConfig, log, lastAssistantReply, freshAutoNewParent);
   }
 
   log(`Classification: action=${result.action} label=${result.targetLabel} confidence=${result.confidence} reason=${result.reason}`);

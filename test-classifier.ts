@@ -279,6 +279,11 @@ async function testReferenceContinue() {
     '刚才提到的第二点是什么意思',
     '上面说的那个怎么操作',
     'about the one you mentioned earlier, how does it work',
+    // Real bug repro (2026-06): "刚刚" wasn't in REFERENCE_SIGNALS (only "刚才"),
+    // so "你刚刚的消息怎么…" fell through to LLM/auto-new and spawned a wrong topic.
+    '你刚刚的消息怎么错发到群里了',
+    '刚刚那个结论再说一遍',
+    '你刚刚发的是什么',
   ];
   for (const m of refMsgs) {
     const r = await classify(m, [], registry, config);
@@ -289,6 +294,11 @@ async function testReferenceContinue() {
   // back (compound-phrase matching only) — otherwise topic-collapse returns.
   const rNew = await classify('帮我查之前武汉总部食堂今天的菜单', [], registry, config);
   assert(rNew.action === 'new', `Bare "之前" in new request → new, not pulled back (got ${rNew.action})`);
+
+  // Same guard for "刚刚": a bare "刚刚" opening a real new topic must NOT be captured
+  // by the compound-phrase reference rule (only 刚刚说/刚刚的/你刚刚… are back-references).
+  const rNew2 = await classify('刚刚下班了帮我查下明天郑州的天气', [], registry, config);
+  assert(rNew2.action === 'new', `Bare "刚刚" in new request → new, not pulled back (got ${rNew2.action})`);
 }
 
 async function testContinuityOverKeyword() {
