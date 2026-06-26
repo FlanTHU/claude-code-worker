@@ -315,11 +315,16 @@ export default definePluginEntry({
                         setPendingForceContinue(autoNew.originalSessionKey, autoNew.previousLabel);
                         log.info(`[topic-router-output] No-context reply in auto-new topic "${label}"; auto-switched active back to "${autoNew.previousLabel}", armed force-continue on "${autoNew.originalSessionKey}"`);
                         footer = `\n\n---\n⚠️ 检测到这条可能是上个话题的追问，已自动切回「${autoNew.previousDisplayName}」。请重发刚才的消息即可在原上下文继续。`;
+                        // This turn handled the misroute via force-continue; the auto-new record has
+                        // done its job — clear it so it can't also fire the classifier-side rescue.
+                        clearRecentAutoNew(sessionKey);
                     }
                     else {
                         footer = `\n\n---\n📌 新话题: ${displayName} | 如非新话题，发送 \`/switch ${autoNew.previousLabel}\` 回到「${autoNew.previousDisplayName}」`;
+                        // Wording regex missed (or this is a genuine new topic): do NOT clear. Keep the
+                        // record so the user's NEXT message gets the classifier-side misroute-rescue
+                        // (LLM-judged switch-back). Its own 5-min TTL expires it if no follow-up comes.
                     }
-                    clearRecentAutoNew(sessionKey);
                 }
                 else {
                     footer = `\n\n---\n📌 话题: ${displayName}`;
