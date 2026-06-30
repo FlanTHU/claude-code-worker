@@ -217,6 +217,66 @@ PYEOF
   echo "  ✓ Dispatch syntax OK"
 fi
 
+# --- Patch 1b: dispatch — pass quoted/reply content into before_dispatch event ---
+# topic-router routes a Feishu reply into the quoted message's topic by reading
+# the `📌 话题:` footer out of the quoted text. But the gateway builds the
+# before_dispatch event with only 7 fields (content/body/channel/sessionKey/
+# senderId/isGroup/timestamp) and drops the quoted body — so the router's
+# `event.quotedContent` is always empty and a reply gets re-classified as new.
+# The quoted body IS on the canonical ctx as `ctx.ReplyToBody` (set in the lark
+# adapter's buildInboundPayload via replyToBody: params.quotedContent). Inject it
+# as `quotedContent` on the event object literal. Safe degrade: undefined when no
+# reply, which the router already treats as "no quote".
+echo "[1b/3] Patching dispatch: inject quotedContent into before_dispatch event"
+if grep -q "quotedContent: ctx.ReplyToBody" "$DISPATCH_FILE" 2>/dev/null; then
+  echo "  Already patched. Skipping."
+else
+  cp "$DISPATCH_FILE" "${DISPATCH_FILE}.qbak"
+  DISPATCH_FILE="$DISPATCH_FILE" python3 - <<'PYEOF'
+import sys, os
+
+dispatch_file = os.environ['DISPATCH_FILE']
+lines = open(dispatch_file).read().split('\n')
+
+# Anchor: the before_dispatch event object literal's first argument ends with
+#   timestamp: hookContext.timestamp
+# immediately followed by a line whose stripped form starts with `}, {` (the
+# boundary between the event object and the context object). Insert our field
+# right after the timestamp line, still inside the event object literal.
+insert_idx = -1
+for i, line in enumerate(lines):
+    if 'timestamp: hookContext.timestamp' in line:
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ''
+        if nxt.startswith('}, {'):
+            insert_idx = i + 1
+            break
+
+if insert_idx == -1:
+    print('ERROR: could not find before_dispatch event timestamp anchor')
+    sys.exit(1)
+
+# Derive indent from the timestamp line so the inserted field lines up.
+anchor = lines[insert_idx - 1]
+indent = anchor[:len(anchor) - len(anchor.lstrip())]
+# The timestamp line had no trailing comma (it was the last field); add one.
+lines[insert_idx - 1] = anchor.rstrip()
+if not lines[insert_idx - 1].rstrip().endswith(','):
+    lines[insert_idx - 1] = lines[insert_idx - 1] + ','
+lines.insert(insert_idx, f'{indent}quotedContent: ctx.ReplyToBody')
+
+with open(dispatch_file, 'w') as f:
+    f.write('\n'.join(lines))
+print('  ✓ quotedContent injected into before_dispatch event')
+PYEOF
+  if ! node -c "$DISPATCH_FILE" 2>/tmp/dispatch-1b-syntax.err; then
+    echo "  ✗ Patched dispatch failed syntax check — restoring backup:"
+    sed 's/^/      /' /tmp/dispatch-1b-syntax.err
+    cp "${DISPATCH_FILE}.qbak" "$DISPATCH_FILE"
+    exit 1
+  fi
+  echo "  ✓ Dispatch (1b) syntax OK"
+fi
+
 # --- Patch 2: hook-runner (allow sessionKey passthrough when handled=false) ---
 # Find the file that actually contains the hook logic (not a re-export stub)
 HOOK_FILE=$(grep -l "handlerResult?.handled" /app/dist/hook-runner-global-*.js 2>/dev/null | head -1)
@@ -262,6 +322,7 @@ fi
 echo ""
 echo "=== Verification ==="
 grep -q "session re-routed" "$DISPATCH_FILE" && echo "  ✓ Dispatch: routing code present" || echo "  ✗ Dispatch: MISSING"
+grep -q "quotedContent: ctx.ReplyToBody" "$DISPATCH_FILE" && echo "  ✓ Dispatch: quotedContent injection present" || echo "  ✗ Dispatch: quotedContent MISSING"
 grep -q "before_dispatch.*sessionKey" "$HOOK_FILE" && echo "  ✓ Hook-runner: sessionKey passthrough present" || echo "  ✗ Hook-runner: MISSING"
 echo ""
 echo "=== Done! Restart gateway to apply. ==="

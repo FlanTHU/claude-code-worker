@@ -64,6 +64,22 @@ fi
 echo "Files copied ($COPIED modules + index.js + manifest)."
 
 echo ""
+echo "=== Step 2.2: Re-apply gateway patches ==="
+# The gateway dist (dispatch/hook-runner) is patched by patch-gateway.sh for
+# before_dispatch session routing AND quoted-reply→topic routing (quotedContent
+# injection). redeploy only refreshes the topic-router plugin dir, so it does NOT
+# touch the gateway dist — an in-place patch therefore survives a redeploy. But if
+# the gateway dist was ever reset (image rebuild outside bootstrap, manual revert),
+# the patch would be silently gone and replies would stop routing to their topic.
+# Re-run it here (idempotent: each patch self-detects and skips if already applied).
+# Tolerate failure so a gateway-layout change never blocks the plugin redeploy.
+if [ -f "$REPO_DIR/patch-gateway.sh" ]; then
+  bash "$REPO_DIR/patch-gateway.sh" || echo "  ⚠️ patch-gateway.sh failed (continuing; verify gateway patches manually)"
+else
+  echo "  (patch-gateway.sh not found, skipping)"
+fi
+
+echo ""
 echo "=== Step 2.5: Ensure writable state dirs ==="
 STATE_DIR="/root/.openclaw/topic-router-state"
 mkdir -p "$STATE_DIR" /root/.openclaw/devices /root/.openclaw/logs/traces
